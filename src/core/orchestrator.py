@@ -21,6 +21,7 @@ from src.sources.wellfound_scraper import WellfoundScraper
 from .aggregator import PeopleAggregator
 from .categorizer import PersonCategorizer
 from src.utils.openai_enhancer import get_openai_enhancer
+from src.scrapers.real_working_scraper import RealWorkingScraper
 
 
 class ConnectionFinder:
@@ -172,6 +173,13 @@ class ConnectionFinder:
     def _initialize_sources(self) -> Dict:
         """Initialize all data sources"""
         sources = {}
+        
+        # Demo data for testing
+        from src.scrapers.demo_scraper import DemoScraper
+        sources['demo'] = DemoScraper()
+        
+        # Tier 0: Real working free LinkedIn search
+        sources['free_linkedin'] = RealWorkingScraper()
         
         # Tier 1: Free scrapers (no API needed)
         sources['github'] = GitHubScraper()

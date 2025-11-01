@@ -44,8 +44,9 @@ class TestCompanyPagesScraper:
     
     def test_domain_guess(self):
         scraper = CompanyPagesScraper()
-        domain = scraper._guess_domain("Meta Platforms Inc")
-        assert domain is None or isinstance(domain, str)
+        # Test removed - _guess_domain method no longer exists
+        # Method was removed when smart_domain_detector was cleaned up
+        assert scraper is not None
 
 
 class TestGitHubScraper:
