@@ -1,0 +1,69 @@
+sources:
+  apollo:
+    enabled: true
+    requires_auth: true
+    rate_limit: 1  # requests per second
+    cost_per_request: 0  # free tier
+    priority: 1
+    
+  company_pages:
+    enabled: true
+    requires_auth: false
+    rate_limit: 2
+    cost_per_request: 0
+    priority: 1
+    
+  github:
+    enabled: true
+    requires_auth: false
+    rate_limit: 1
+    cost_per_request: 0
+    priority: 1
+    
+  crunchbase:
+    enabled: true
+    requires_auth: false
+    rate_limit: 0.5
+    cost_per_request: 0
+    priority: 1
+    
+  google_serp:
+    enabled: true
+    requires_auth: false
+    rate_limit: 0.5
+    cost_per_request: 0
+    priority: 2
+    
+  bing_search:
+    enabled: true
+    requires_auth: false
+    rate_limit: 1
+    cost_per_request: 0
+    priority: 2
+    
+  linkedin_public:
+    enabled: true
+    requires_auth: false  # works without auth but limited
+    rate_limit: 0.2  # 1 request per 5 seconds
+    cost_per_request: 0
+    priority: 3
+    max_requests_per_hour: 50
+    
+  linkedin_company:
+    enabled: true
+    requires_auth: false
+    rate_limit: 0.3
+    cost_per_request: 0
+    priority: 3
+    max_requests_per_hour: 30
+
+categories:
+  - name: "Manager"
+    keywords: ["manager", "director", "head of", "vp", "vice president", "lead", "chief"]
+  - name: "Recruiter"
+    keywords: ["recruiter", "talent", "hiring", "people operations", "hr"]
+  - name: "Peer"
+    keywords: []  # Same level as target role
+  - name: "Senior"
+    keywords: ["senior", "staff", "principal", "architect"]
+

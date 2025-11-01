@@ -1,0 +1,28 @@
+# Core dependencies
+requests>=2.31.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pyyaml>=6.0.1
+
+# Web scraping
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+playwright>=1.40.0
+playwright-stealth>=1.0.0
+
+# Rate limiting and caching
+ratelimit>=2.2.1
+diskcache>=5.6.3
+
+# Data processing
+python-dateutil>=2.8.2
+
+# Optional API clients
+anthropic>=0.8.0  # For Claude if needed
+openai>=1.0.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+

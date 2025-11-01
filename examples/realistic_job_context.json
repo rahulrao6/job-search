@@ -1,0 +1,19 @@
+{
+  "job_url": "https://www.linkedin.com/jobs/view/3798765432",
+  "job_text": "Software Engineer - Infrastructure\n\nMeta is seeking experienced Software Engineers to join our Infrastructure team in Menlo Park, CA. You will work on building scalable systems that power Facebook, Instagram, and WhatsApp.\n\nResponsibilities:\n- Design and implement distributed systems\n- Optimize performance and reliability\n- Collaborate with product teams\n\nRequirements:\n- 3+ years of software engineering experience\n- Strong knowledge of C++, Python, or Java\n- Experience with distributed systems\n- BS/MS in Computer Science or related field\n\nDepartment: Infrastructure Engineering\nLocation: Menlo Park, CA\nType: Full-time",
+  
+  "company": "Meta",
+  "company_domain": "meta.com",
+  "job_title": "Software Engineer - Infrastructure",
+  "department": "Infrastructure Engineering",
+  "location": "Menlo Park, CA",
+  
+  "candidate_resume": "John Doe\njohndoe@email.com | LinkedIn: linkedin.com/in/johndoe\n\nEDUCATION\nStanford University\nB.S. Computer Science, 2020\nGPA: 3.8/4.0\n\nEXPERIENCE\n\nSoftware Engineer | Google | 2020 - 2023\n- Built distributed systems for Google Cloud\n- Improved latency by 40%\n- Led team of 3 engineers\n\nSoftware Engineering Intern | Amazon | Summer 2019\n- Worked on AWS Lambda infrastructure\n- Developed monitoring tools\n\nSKILLS\nPython, Java, C++, Go, Kubernetes, Docker, AWS, GCP, Distributed Systems, System Design",
+  
+  "candidate_linkedin_url": "https://linkedin.com/in/johndoe",
+  
+  "candidate_schools": ["Stanford University"],
+  "candidate_past_companies": ["Google", "Amazon"],
+  "candidate_skills": ["Python", "Java", "C++", "Go", "Kubernetes", "Docker", "AWS", "Distributed Systems"]
+}
+
