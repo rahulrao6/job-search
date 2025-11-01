@@ -21,7 +21,6 @@ from src.sources.wellfound_scraper import WellfoundScraper
 from .aggregator import PeopleAggregator
 from .categorizer import PersonCategorizer
 from src.utils.openai_enhancer import get_openai_enhancer
-from src.scrapers.real_working_scraper import RealWorkingScraper
 
 
 class ConnectionFinder:
@@ -30,6 +29,20 @@ class ConnectionFinder:
     
     Coordinates all data sources, aggregation, and categorization.
     """
+    
+    # Source quality scores (higher = better data quality)
+    SOURCE_QUALITY_SCORES = {
+        'google_serp': 1.0,  # Best: LinkedIn URLs + metadata
+        'serpapi': 1.0,
+        'apollo': 0.9,  # Good: Professional database
+        'github': 0.4,  # Low: Minimal metadata (no titles, locations)
+        'company_pages': 0.6,
+        'twitter': 0.3,
+        'wellfound': 0.5,
+        'crunchbase': 0.7,
+        'linkedin_public': 0.8,
+        'free_linkedin': 0.7,
+    }
     
     def __init__(self, config_path: Optional[str] = None):
         """
@@ -126,17 +139,21 @@ class ConnectionFinder:
         # Get all unique people
         all_people = aggregator.get_all()
         
-        # Use OpenAI to enhance if available
+        # Use OpenAI to enhance if available (increased limit for production)
         enhancer = get_openai_enhancer()
         if enhancer.enabled and all_people:
-            print(f"\n▶ Using OpenAI to enhance data...")
-            all_people = enhancer.enhance_batch(all_people, title)
+            print(f"\n▶ Using OpenAI to enhance data (up to 50 people)...")
+            # Enhance more people in production for better categorization
+            all_people = enhancer.enhance_batch(all_people, title, max_enhance=50)
         
         # Categorize people
         categorized_people = categorizer.categorize_batch(all_people)
         
         # Group by category
         by_category = self._group_by_category(categorized_people)
+        
+        # Sort within each category by source quality, then confidence
+        by_category = self._sort_by_quality(by_category)
         
         # Show ALL connections (not just top 5)
         # Users requested to see all data, not limited results
@@ -168,29 +185,28 @@ class ConnectionFinder:
         return results
     
     def _initialize_sources(self) -> Dict:
-        """Initialize all data sources"""
+        """
+        Initialize ONLY working data sources for production.
+        
+        Disabled non-working sources:
+        - free_linkedin (RealWorkingScraper): Search engines not returning results
+        - company_pages: Missing dependencies
+        - twitter: Nitter instances down
+        - wellfound: Not finding companies
+        - crunchbase: 403 Forbidden
+        - linkedin_public: ToS violation
+        """
         sources = {}
         
-        # Demo data for testing - DISABLED for production
-        # from src.scrapers.demo_scraper import DemoScraper
-        # sources['demo'] = DemoScraper()
-        
-        # Tier 0: Real working free LinkedIn search
-        sources['free_linkedin'] = RealWorkingScraper()
-        
-        # Tier 1: Free scrapers (no API needed)
-        sources['github'] = GitHubScraper()
-        sources['company_pages'] = CompanyPagesScraper()
-        sources['twitter'] = TwitterSearchScraper()
-        sources['wellfound'] = WellfoundScraper()
-        sources['crunchbase'] = CrunchbaseScraper()
-        
-        # Tier 2: APIs (require keys)
-        sources['apollo'] = ApolloClient()
+        # PRODUCTION: Only use sources that actually work
+        # Tier 1: SerpAPI/Google Search (PRIMARY - best quality)
         sources['google_serp'] = GoogleSearchScraper()
         
-        # Tier 3: LinkedIn (disabled by default - risky)
-        sources['linkedin_public'] = LinkedInPublicScraper()
+        # Tier 2: Apollo (if configured)
+        sources['apollo'] = ApolloClient()
+        
+        # Tier 3: GitHub (SECONDARY - minimal metadata, sort last)
+        sources['github'] = GitHubScraper()
         
         return sources
     
@@ -257,11 +273,28 @@ class ConnectionFinder:
         for person in people:
             groups[person.category].append(person)
         
-        # Sort each group by confidence
-        for category in groups:
-            groups[category].sort(key=lambda p: p.confidence_score, reverse=True)
-        
         return groups
+    
+    def _sort_by_quality(self, by_category: Dict[PersonCategory, List[Person]]) -> Dict[PersonCategory, List[Person]]:
+        """
+        Sort people within each category by quality:
+        1. Source quality (SerpAPI > Apollo > GitHub)
+        2. Confidence score
+        
+        This ensures high-quality results (with LinkedIn URLs, metadata) appear first,
+        and low-quality results (GitHub with minimal data) appear last.
+        """
+        for category in by_category:
+            by_category[category] = sorted(
+                by_category[category],
+                key=lambda p: (
+                    self.SOURCE_QUALITY_SCORES.get(p.source, 0.5),  # Primary: source quality
+                    p.confidence_score  # Secondary: confidence
+                ),
+                reverse=True
+            )
+        
+        return by_category
     
     def _person_to_dict(self, person: Person) -> dict:
         """Convert Person to dictionary for output"""

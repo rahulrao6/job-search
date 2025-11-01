@@ -437,7 +437,14 @@ RESULTS_TEMPLATE = """
                         View on LinkedIn →
                     </a>
                     {% endif %}
-                    <span class="person-source">from {{ person.source }}</span>
+                    <span class="person-source">
+                        from {{ person.source }}
+                        {% if person.source == 'google_serp' or person.source == 'serpapi' %}
+                        <span style="color: #10b981; font-weight: 600;">★</span>
+                        {% elif person.source == 'github' %}
+                        <span style="color: #f59e0b;">⚠</span>
+                        {% endif %}
+                    </span>
                 </div>
                 
                 <div class="person-meta">

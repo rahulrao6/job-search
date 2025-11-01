@@ -97,14 +97,23 @@ If the title is messy (like a GitHub bio), extract the actual job title."""
         
         return person
     
-    def enhance_batch(self, people: List[Person], target_title: str) -> List[Person]:
-        """Enhance multiple people (but limit to save costs)"""
+    def enhance_batch(self, people: List[Person], target_title: str, max_enhance: int = 20) -> List[Person]:
+        """
+        Enhance multiple people (but limit to save costs)
+        
+        Args:
+            people: List of people to enhance
+            target_title: Target job title for context
+            max_enhance: Maximum number to enhance (default 20, can increase for production)
+        
+        Returns:
+            List of enhanced people
+        """
         if not self.enabled or not people:
             return people
         
-        # Only enhance top candidates to save money
         # Cost: ~$0.001 per person with gpt-3.5-turbo
-        max_enhance = 20
+        # For production with 50 people: ~$0.05 per search (very affordable)
         
         enhanced = []
         for i, person in enumerate(people):
@@ -113,6 +122,7 @@ If the title is messy (like a GitHub bio), extract the actual job title."""
             else:
                 enhanced.append(person)
         
+        print(f"✓ Enhanced {min(len(people), max_enhance)} people with OpenAI")
         return enhanced
 
 
