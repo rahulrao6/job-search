@@ -19,6 +19,20 @@ This tool helps job seekers identify high-value connections at companies by:
 
 ## Quick Start
 
+### Option 1: Web Interface (Easiest!)
+
+**Local Testing:**
+```bash
+pip install -r requirements.txt
+python web_app.py
+```
+Then open: http://localhost:8000
+
+**Deploy to Render (Free):**
+See [RENDER_SETUP.md](RENDER_SETUP.md) for 2-minute deployment instructions.
+
+### Option 2: CLI/Scripts
+
 1. **Install dependencies**:
 ```bash
 pip install -r requirements.txt
@@ -69,9 +83,27 @@ outputs/             # Results and reports
 - LinkedIn public profiles
 - LinkedIn company pages
 
+## Web Interface
+
+The project includes a Flask web app for easy testing and sharing:
+
+- **Local**: Run `python web_app.py` and open http://localhost:8000
+- **Deploy**: Push to GitHub and deploy on Render.com (free tier)
+- **Share**: Send the URL to friends - no installation needed!
+
+See [QUICK_START.md](QUICK_START.md) for user-friendly instructions.
+
 ## Configuration
 
 See `docs/setup_guide.md` for detailed setup instructions.
+
+## Deployment
+
+**Render.com (Recommended - Free)**
+- See [RENDER_SETUP.md](RENDER_SETUP.md) for step-by-step instructions
+- Free tier with auto-deploy from GitHub
+- No credit card required
+- Perfect for sharing with friends and testing
 
 ## Legal & ToS
 

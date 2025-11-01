@@ -4,9 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-ENV/
 build/
 develop-eggs/
 dist/
@@ -23,17 +20,15 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
 .env
-.env.local
-
-# Cache
-.cache/
-*.cache
-
-# Outputs
-outputs/
-*.log
+config/.env
 
 # IDE
 .vscode/
@@ -46,17 +41,22 @@ outputs/
 .DS_Store
 Thumbs.db
 
-# Playwright
-playwright/.cache/
+# Outputs
+outputs/*.json
+outputs/*.md
+!outputs/.gitkeep
 
-# Testing
+# Logs
+*.log
+
+# Cache
+.cache/
+*.cache
 .pytest_cache/
-.coverage
-htmlcov/
 
-# Jupyter
-.ipynb_checkpoints/
+# Playwright
+.playwright/
 
-# Node (if any)
-node_modules/
-
+# Replit (deprecated - using Render now)
+.replit
+replit.nix
