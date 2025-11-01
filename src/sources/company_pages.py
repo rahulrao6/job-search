@@ -1,4 +1,4 @@
-"""Advanced company career and team pages scraper"""
+"""Fixed company career and team pages scraper"""
 
 import re
 from typing import List, Optional, Dict, Set
@@ -7,27 +7,37 @@ from bs4 import BeautifulSoup
 from src.models.person import Person, PersonCategory
 from src.utils.http_client import create_client
 from src.utils.rate_limiter import get_rate_limiter
-# from src.utils.smart_domain_detector import detect_company_domain, get_company_info
 
 
 class CompanyPagesScraper:
     """
-    Advanced company website scraper that finds:
-    - Leadership teams (CEOs, VPs, Directors)
-    - Department heads (Engineering, Product, Sales)
-    - Team pages with employee listings  
-    - Job posting contacts (hiring managers)
-    - About pages with executive profiles
+    FIXED: Company website scraper that finds people on team pages.
     
-    Uses intelligent parsing with multiple extraction strategies.
+    Searches common page patterns:
+    - /team, /about/team, /leadership
+    - /people, /our-team, /careers
+    - Extracts names, titles, LinkedIn URLs
     """
     
     def __init__(self):
         self.http_client = create_client()
         self.rate_limiter = get_rate_limiter()
-        self.rate_limiter.configure("company_pages", requests_per_second=1)  # Be respectful
+        self.rate_limiter.configure("company_pages", requests_per_second=1)
         
-        # Enhanced patterns for different types of people
+        # Common URL patterns to check
+        self.page_patterns = [
+            "/team",
+            "/about/team",
+            "/about/leadership",
+            "/leadership",
+            "/people",
+            "/our-team",
+            "/company/team",
+            "/careers/team",
+            "/about-us/team",
+        ]
+        
+        # Keywords for categorization
         self.leadership_keywords = [
             "ceo", "cto", "cfo", "coo", "president", "founder", "co-founder",
             "vice president", "vp", "director", "head of", "chief", "executive"
@@ -45,238 +55,235 @@ class CompanyPagesScraper:
     
     def search_people(self, company: str, title: str, company_domain: Optional[str] = None, **kwargs) -> List[Person]:
         """
-        Advanced search for people on company website.
+        Search company website for team members.
         
         Args:
             company: Company name
-            title: Job title to search for
-            company_domain: Company website domain (e.g., "meta.com")
+            title: Job title (for context)
+            company_domain: Company domain (e.g., "google.com")
         
         Returns:
             List of Person objects
         """
-        # Smart domain detection
         if not company_domain:
-            company_domain = detect_company_domain(company, use_web_search=False)
+            # Try to guess domain from company name
+            company_domain = self._guess_domain(company)
+            if not company_domain:
+                print(f"⚠️  No domain provided for {company}")
+                return []
         
-        if not company_domain:
-            print(f"⚠️  Could not detect domain for {company}")
-            return []
+        print(f"🔍 Scraping {company_domain} team pages...")
         
-        # Get comprehensive company information
-        company_info = get_company_info(company, company_domain)
+        people = []
+        for pattern in self.page_patterns:
+            url = f"https://{company_domain}{pattern}"
+            
+            try:
+                # Rate limit
+                self.rate_limiter.wait_if_needed("company_pages")
+                
+                # Fetch page
+                response = self.http_client.get(url, timeout=10)
+                if response.status_code != 200:
+                    continue
+                
+                # Parse HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract people from page
+                page_people = self._extract_people_from_page(soup, company, url)
+                people.extend(page_people)
+                
+                if page_people:
+                    print(f"  ✓ Found {len(page_people)} people on {pattern}")
+                
+            except Exception as e:
+                # Silent fail - just skip this page
+                continue
         
-        print(f"ℹ️  Searching {company_domain} ({company_info['type']} company)")
+        # Deduplicate by name
+        unique_people = self._deduplicate(people)
         
-        all_people = set()  # Use set to avoid duplicates
-        
-        # Strategy 1: Use known career page URLs if available
-        if company_info["career_page_urls"]:
-            for url in company_info["career_page_urls"][:3]:  # Max 3 career pages
-                people = self._scrape_career_page(url, company)
-                all_people.update(people)
-        
-        # Strategy 2: Try common team/leadership pages
-        team_people = self._scrape_team_pages(company_domain, company)
-        all_people.update(team_people)
-        
-        # Strategy 3: Look for specific role-related pages
-        role_people = self._scrape_role_specific_pages(company_domain, company, title)
-        all_people.update(role_people)
-        
-        # Convert set back to list
-        final_people = list(all_people)
-        
-        if final_people:
-            print(f"✓ Company pages found {len(final_people)} people")
-            return self._rank_and_filter_people(final_people, title)
+        if unique_people:
+            print(f"✓ Company pages found {len(unique_people)} people")
         else:
-            print(f"⚠️  No people found on company pages for {company}")
-            return []
-    
-    def _scrape_team_pages(self, domain: str, company: str) -> Set[Person]:
-        """Scrape team/leadership pages"""
-        people = set()
+            print(f"⚠️  No people found on company pages")
         
-        # Comprehensive list of team page paths
-        team_paths = [
-            "/team", "/about/team", "/company/team", "/our-team",
-            "/leadership", "/about/leadership", "/company/leadership", "/executives",
-            "/about", "/about-us", "/company/about",
-            "/people", "/company/people", "/our-people",
-            "/management", "/company/management",
-            "/board", "/board-of-directors", "/advisory-board",
-            "/founders", "/company/founders"
+        return unique_people
+    
+    def _extract_people_from_page(self, soup: BeautifulSoup, company: str, page_url: str) -> List[Person]:
+        """Extract people from a team page"""
+        people = []
+        
+        # Strategy 1: Look for structured team member cards/sections
+        team_selectors = [
+            'div.team-member',
+            'div.person',
+            'div.employee',
+            'article.team',
+            'div[class*="team"]',
+            'div[class*="person"]',
+            'div[class*="member"]',
         ]
         
-        for path in team_paths:
-            self.rate_limiter.wait_if_needed("company_pages")
-            
-            try:
-                url = f"https://{domain}{path}"
-                response = self.http_client.get(url, timeout=10)
-                
-                if response.status_code == 200:
-                    page_people = self._extract_people_from_page(response.text, company, url)
-                    if page_people:
-                        people.update(page_people)
-                        print(f"✓ Found {len(page_people)} people on {path}")
-                        
-                        # If we found a lot of people, this is probably the main team page
-                        if len(page_people) >= 10:
-                            break
-                            
-            except Exception as e:
-                continue
+        for selector in team_selectors:
+            cards = soup.select(selector)
+            for card in cards:
+                person = self._extract_person_from_card(card, company, page_url)
+                if person:
+                    people.append(person)
         
-        return people
-    
-    def _scrape_role_specific_pages(self, domain: str, company: str, title: str) -> Set[Person]:
-        """Look for pages specific to the role being searched"""
-        people = set()
-        
-        # Generate role-specific paths
-        role_paths = []
-        
-        if "engineer" in title.lower() or "developer" in title.lower():
-            role_paths.extend([
-                "/engineering", "/engineering/team", "/dev-team",
-                "/technology", "/tech-team", "/developers"
-            ])
-        
-        if "product" in title.lower():
-            role_paths.extend([
-                "/product", "/product/team", "/product-team"
-            ])
-        
-        if "sales" in title.lower() or "business" in title.lower():
-            role_paths.extend([
-                "/sales", "/sales/team", "/business-development"
-            ])
-        
-        if "marketing" in title.lower():
-            role_paths.extend([
-                "/marketing", "/marketing/team"
-            ])
-        
-        for path in role_paths:
-            self.rate_limiter.wait_if_needed("company_pages")
-            
-            try:
-                url = f"https://{domain}{path}"
-                response = self.http_client.get(url, timeout=10)
-                
-                if response.status_code == 200:
-                    page_people = self._extract_people_from_page(response.text, company, url)
-                    if page_people:
-                        people.update(page_people)
-                        print(f"✓ Found {len(page_people)} people on role page {path}")
-                        
-            except Exception as e:
-                continue
-        
-        return people
-    
-    def _scrape_career_page(self, url: str, company: str) -> Set[Person]:
-        """Scrape a specific career page"""
-        people = set()
-        
-        self.rate_limiter.wait_if_needed("company_pages")
-        
-        try:
-            response = self.http_client.get(url, timeout=10)
-            if response.status_code == 200:
-                page_people = self._extract_people_from_page(response.text, company, url)
-                if page_people:
-                    people.update(page_people)
-                    print(f"✓ Found {len(page_people)} people on career page")
-                    
-        except Exception as e:
-            print(f"⚠️  Error scraping career page {url}: {e}")
-        
-        return people
-    
-    def _extract_people_from_page(self, html: str, company: str, url: str) -> List[Person]:
-        """Extract people names and titles from a team page"""
-        soup = BeautifulSoup(html, 'html.parser')
-        people = []
-        
-        # Look for common patterns for team member cards
-        # Pattern 1: div/article with person info
-        containers = soup.find_all(['div', 'article', 'section'], 
-                                   class_=re.compile(r'(team|member|person|employee|profile)', re.I))
-        
-        for container in containers:
-            person = self._extract_person_from_container(container, company, url)
-            if person:
-                people.append(person)
-        
-        # Pattern 2: Structured lists
-        # Look for name-title pairs in lists
+        # Strategy 2: Look for name + title patterns in text
         if not people:
-            people = self._extract_from_lists(soup, company, url)
+            people = self._extract_from_text_patterns(soup, company, page_url)
         
         return people
     
-    def _extract_person_from_container(self, container, company: str, url: str) -> Optional[Person]:
-        """Extract person info from a container element"""
-        try:
-            # Find name (usually in h2, h3, h4, or strong)
-            name_elem = container.find(['h2', 'h3', 'h4', 'h5', 'strong', 'span'], 
-                                       class_=re.compile(r'name', re.I))
-            if not name_elem:
-                name_elem = container.find(['h2', 'h3', 'h4', 'h5'])
-            
-            if not name_elem:
-                return None
-            
-            name = name_elem.get_text(strip=True)
-            
-            # Find title (usually nearby or in class with "title" or "role")
-            title_elem = container.find(['p', 'span', 'div'], 
-                                       class_=re.compile(r'(title|role|position)', re.I))
-            title = title_elem.get_text(strip=True) if title_elem else None
-            
-            # Find LinkedIn if available
-            linkedin_url = None
-            linkedin_link = container.find('a', href=re.compile(r'linkedin\.com'))
-            if linkedin_link:
-                linkedin_url = linkedin_link.get('href')
-            
-            if name and len(name) > 2 and len(name) < 100:
-                return Person(
-                    name=name,
-                    title=title,
-                    company=company,
-                    linkedin_url=linkedin_url,
-                    source="company_pages",
-                    evidence_url=url,
-                )
-        except Exception as e:
-            pass
+    def _extract_person_from_card(self, card, company: str, page_url: str) -> Optional[Person]:
+        """Extract person info from a team member card"""
+        # Find name
+        name = None
+        name_selectors = ['h2', 'h3', 'h4', '.name', '[class*="name"]', 'strong']
+        for selector in name_selectors:
+            elem = card.select_one(selector)
+            if elem and len(elem.get_text(strip=True)) > 2:
+                name = elem.get_text(strip=True)
+                break
         
-        return None
+        if not name:
+            return None
+        
+        # Find title
+        title = None
+        title_selectors = ['.title', '.role', '.position', '[class*="title"]', '[class*="role"]', 'p']
+        for selector in title_selectors:
+            elem = card.select_one(selector)
+            if elem:
+                text = elem.get_text(strip=True)
+                # Check if it looks like a title (not too long)
+                if text and len(text) < 100 and text != name:
+                    title = text
+                    break
+        
+        # Find LinkedIn URL
+        linkedin_url = None
+        links = card.find_all('a', href=True)
+        for link in links:
+            href = link['href']
+            if 'linkedin.com/in/' in href:
+                linkedin_url = href
+                break
+        
+        # Create person
+        return Person(
+            name=name,
+            title=title,
+            company=company,
+            linkedin_url=linkedin_url,
+            source="company_pages",
+            evidence_url=page_url,
+            category=self._categorize(title) if title else PersonCategory.UNKNOWN,
+            confidence_score=0.7 if linkedin_url else 0.5
+        )
     
-    def _extract_from_lists(self, soup, company: str, url: str) -> List[Person]:
-        """Extract people from list structures"""
+    def _extract_from_text_patterns(self, soup: BeautifulSoup, company: str, page_url: str) -> List[Person]:
+        """Fallback: Extract from text patterns like 'John Doe, CEO'"""
         people = []
         
-        # Find all text that looks like "Name - Title" or "Name, Title"
+        # Get all text
         text = soup.get_text()
         
-        # Pattern: Name followed by dash or comma and title
-        pattern = r'([A-Z][a-z]+ [A-Z][a-z]+)\s*[-–—,]\s*([A-Z][a-z\s]+)'
-        matches = re.findall(pattern, text)
+        # Pattern: Name, Title or Name - Title
+        patterns = [
+            r'([A-Z][a-z]+ [A-Z][a-z]+)[,\-–—]\s*([A-Z][a-z\s]+(?:Officer|Manager|Director|Engineer|Designer|Developer))',
+        ]
         
-        for name, title in matches[:20]:  # Limit to avoid false positives
-            if len(name) > 2 and len(title) > 2:
-                people.append(Person(
-                    name=name.strip(),
-                    title=title.strip(),
-                    company=company,
-                    source="company_pages",
-                    evidence_url=url,
-                ))
+        for pattern in patterns:
+            matches = re.findall(pattern, text)
+            for name, title in matches:
+                if len(name) > 5 and len(title) > 3:
+                    person = Person(
+                        name=name.strip(),
+                        title=title.strip(),
+                        company=company,
+                        source="company_pages",
+                        evidence_url=page_url,
+                        category=self._categorize(title),
+                        confidence_score=0.4  # Lower confidence for text extraction
+                    )
+                    people.append(person)
         
         return people
+    
+    def _categorize(self, title: str) -> PersonCategory:
+        """Categorize person by title"""
+        if not title:
+            return PersonCategory.UNKNOWN
+        
+        title_lower = title.lower()
+        
+        # Check for recruiter
+        if any(keyword in title_lower for keyword in self.recruiter_keywords):
+            return PersonCategory.RECRUITER
+        
+        # Check for manager/leadership
+        if any(keyword in title_lower for keyword in self.manager_keywords + self.leadership_keywords):
+            return PersonCategory.MANAGER
+        
+        # Check for senior
+        if 'senior' in title_lower or 'sr.' in title_lower or 'lead' in title_lower:
+            return PersonCategory.SENIOR
+        
+        return PersonCategory.UNKNOWN
+    
+    def _deduplicate(self, people: List[Person]) -> List[Person]:
+        """Remove duplicates by name"""
+        seen = set()
+        unique = []
+        
+        for person in people:
+            key = person.name.lower().strip()
+            if key not in seen:
+                seen.add(key)
+                unique.append(person)
+        
+        return unique
+    
+    def _guess_domain(self, company: str) -> Optional[str]:
+        """Guess company domain from name"""
+        # Common company domain mappings
+        domain_map = {
+            "google": "google.com",
+            "meta": "meta.com",
+            "facebook": "meta.com",
+            "amazon": "amazon.com",
+            "apple": "apple.com",
+            "microsoft": "microsoft.com",
+            "netflix": "netflix.com",
+            "tesla": "tesla.com",
+            "twitter": "twitter.com",
+            "x": "x.com",
+            "linkedin": "linkedin.com",
+            "uber": "uber.com",
+            "airbnb": "airbnb.com",
+            "stripe": "stripe.com",
+            "spotify": "spotify.com",
+            "snapchat": "snap.com",
+            "pinterest": "pinterest.com",
+            "reddit": "reddit.com",
+            "discord": "discord.com",
+            "slack": "slack.com",
+            "zoom": "zoom.us",
+            "salesforce": "salesforce.com",
+            "oracle": "oracle.com",
+            "ibm": "ibm.com",
+            "adobe": "adobe.com",
+            "nvidia": "nvidia.com",
+            "intel": "intel.com",
+            "amd": "amd.com",
+            "cisco": "cisco.com",
+        }
+        
+        company_lower = company.lower().strip()
+        return domain_map.get(company_lower)
 

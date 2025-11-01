@@ -21,6 +21,7 @@ from src.sources.wellfound_scraper import WellfoundScraper
 from .aggregator import PeopleAggregator
 from .categorizer import PersonCategorizer
 from src.utils.openai_enhancer import get_openai_enhancer
+from src.utils.person_validator import get_validator
 
 
 class ConnectionFinder:
@@ -139,15 +140,21 @@ class ConnectionFinder:
         # Get all unique people
         all_people = aggregator.get_all()
         
+        # VALIDATE: Remove false positives before processing
+        print(f"\n▶ Validating {len(all_people)} people (removing false positives)...")
+        validator = get_validator(company)
+        validated_people = validator.validate_batch(all_people)
+        print(f"✓ Kept {len(validated_people)} valid people (filtered {len(all_people) - len(validated_people)} false positives)")
+        
         # Use OpenAI to enhance if available (increased limit for production)
         enhancer = get_openai_enhancer()
-        if enhancer.enabled and all_people:
+        if enhancer.enabled and validated_people:
             print(f"\n▶ Using OpenAI to enhance data (up to 50 people)...")
             # Enhance more people in production for better categorization
-            all_people = enhancer.enhance_batch(all_people, title, max_enhance=50)
+            validated_people = enhancer.enhance_batch(validated_people, title, max_enhance=50)
         
         # Categorize people
-        categorized_people = categorizer.categorize_batch(all_people)
+        categorized_people = categorizer.categorize_batch(validated_people)
         
         # Group by category
         by_category = self._group_by_category(categorized_people)
@@ -186,27 +193,30 @@ class ConnectionFinder:
     
     def _initialize_sources(self) -> Dict:
         """
-        Initialize ONLY working data sources for production.
+        Initialize ALL data sources (free + paid).
         
-        Disabled non-working sources:
-        - free_linkedin (RealWorkingScraper): Search engines not returning results
-        - company_pages: Missing dependencies
-        - twitter: Nitter instances down
-        - wellfound: Not finding companies
-        - crunchbase: 403 Forbidden
-        - linkedin_public: ToS violation
+        Strategy: Quality sorting ensures best sources appear first,
+        but we still run ALL sources to maximize free results.
+        
+        Free sources are KEY for scalability!
         """
         sources = {}
         
-        # PRODUCTION: Only use sources that actually work
-        # Tier 1: SerpAPI/Google Search (PRIMARY - best quality)
-        sources['google_serp'] = GoogleSearchScraper()
+        # Tier 1: Premium APIs (best quality, but cost money)
+        sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0
+        sources['apollo'] = ApolloClient()              # Quality: 0.9
         
-        # Tier 2: Apollo (if configured)
-        sources['apollo'] = ApolloClient()
+        # Tier 2: Free sources (need improvement, but essential for scale)
+        from src.scrapers.real_working_scraper import RealWorkingScraper
+        sources['free_linkedin'] = RealWorkingScraper()  # Quality: 0.7 - FIX ME
+        sources['github'] = GitHubScraper()               # Quality: 0.4
+        sources['company_pages'] = CompanyPagesScraper()  # Quality: 0.6 - FIX ME
+        sources['twitter'] = TwitterSearchScraper()       # Quality: 0.3 - FIX ME
+        sources['wellfound'] = WellfoundScraper()        # Quality: 0.5 - FIX ME
+        sources['crunchbase'] = CrunchbaseScraper()      # Quality: 0.7 - FIX ME
         
-        # Tier 3: GitHub (SECONDARY - minimal metadata, sort last)
-        sources['github'] = GitHubScraper()
+        # Tier 3: LinkedIn public (disabled by default - ToS risk)
+        # sources['linkedin_public'] = LinkedInPublicScraper()  # Keep disabled
         
         return sources
     
