@@ -138,11 +138,8 @@ class ConnectionFinder:
         # Group by category
         by_category = self._group_by_category(categorized_people)
         
-        # Get top 5 per category
-        top_by_category = {
-            category: people[:5]
-            for category, people in by_category.items()
-        }
+        # Show ALL connections (not just top 5)
+        # Users requested to see all data, not limited results
         
         # Prepare results
         results = {
@@ -151,7 +148,7 @@ class ConnectionFinder:
             "total_found": len(all_people),
             "by_category": {
                 category.value: [self._person_to_dict(p) for p in people]
-                for category, people in top_by_category.items()
+                for category, people in by_category.items()
             },
             "category_counts": {
                 category.value: len(people)
@@ -174,9 +171,9 @@ class ConnectionFinder:
         """Initialize all data sources"""
         sources = {}
         
-        # Demo data for testing
-        from src.scrapers.demo_scraper import DemoScraper
-        sources['demo'] = DemoScraper()
+        # Demo data for testing - DISABLED for production
+        # from src.scrapers.demo_scraper import DemoScraper
+        # sources['demo'] = DemoScraper()
         
         # Tier 0: Real working free LinkedIn search
         sources['free_linkedin'] = RealWorkingScraper()

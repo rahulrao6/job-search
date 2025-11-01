@@ -324,6 +324,44 @@ RESULTS_TEMPLATE = """
             font-size: 11px;
             color: #999;
         }
+        .person-meta {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #f0f0f0;
+            font-size: 12px;
+            color: #666;
+        }
+        .meta-item {
+            display: inline-block;
+            margin-right: 16px;
+            margin-bottom: 4px;
+        }
+        .meta-label {
+            font-weight: 600;
+            color: #888;
+        }
+        .confidence-high {
+            color: #10b981;
+            font-weight: 600;
+        }
+        .confidence-medium {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+        .confidence-low {
+            color: #ef4444;
+            font-weight: 600;
+        }
+        .skill-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #e7f3ff;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 4px;
+            margin-bottom: 4px;
+            color: #0077b5;
+        }
         .no-results {
             text-align: center;
             padding: 40px;
@@ -388,24 +426,63 @@ RESULTS_TEMPLATE = """
                 <span class="category-count">{{ people|length }}</span>
             </div>
             
-            {% for person in people[:10] %}
+            {% for person in people %}
             <div class="person-card">
                 <div class="person-name">{{ person.name }}</div>
                 <div class="person-title">{{ person.title }}</div>
-                {% if person.linkedin_url %}
-                <a href="{{ person.linkedin_url }}" target="_blank" class="person-linkedin">
-                    View on LinkedIn →
-                </a>
-                {% endif %}
-                <span class="person-source">from {{ person.source }}</span>
+                
+                <div style="margin-top: 8px;">
+                    {% if person.linkedin_url %}
+                    <a href="{{ person.linkedin_url }}" target="_blank" class="person-linkedin">
+                        View on LinkedIn →
+                    </a>
+                    {% endif %}
+                    <span class="person-source">from {{ person.source }}</span>
+                </div>
+                
+                <div class="person-meta">
+                    {% if person.confidence_score %}
+                    <div class="meta-item">
+                        <span class="meta-label">Confidence:</span>
+                        {% if person.confidence_score >= 0.7 %}
+                        <span class="confidence-high">{{ "%.0f"|format(person.confidence_score * 100) }}%</span>
+                        {% elif person.confidence_score >= 0.4 %}
+                        <span class="confidence-medium">{{ "%.0f"|format(person.confidence_score * 100) }}%</span>
+                        {% else %}
+                        <span class="confidence-low">{{ "%.0f"|format(person.confidence_score * 100) }}%</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if person.department %}
+                    <div class="meta-item">
+                        <span class="meta-label">Dept:</span> {{ person.department }}
+                    </div>
+                    {% endif %}
+                    
+                    {% if person.location %}
+                    <div class="meta-item">
+                        <span class="meta-label">Location:</span> {{ person.location }}
+                    </div>
+                    {% endif %}
+                    
+                    {% if person.experience_years %}
+                    <div class="meta-item">
+                        <span class="meta-label">Experience:</span> {{ person.experience_years }} years
+                    </div>
+                    {% endif %}
+                    
+                    {% if person.skills %}
+                    <div style="margin-top: 8px;">
+                        <span class="meta-label">Skills:</span>
+                        {% for skill in person.skills[:5] %}
+                        <span class="skill-tag">{{ skill }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
             </div>
             {% endfor %}
-            
-            {% if people|length > 10 %}
-            <div style="text-align: center; color: #999; font-size: 14px; margin-top: 10px;">
-                ... and {{ people|length - 10 }} more
-            </div>
-            {% endif %}
         </div>
         {% endif %}
         {% endfor %}
@@ -454,13 +531,21 @@ def search():
         categories_display = {}
         for category, people_list in by_category.items():
             if people_list:
-                # Convert dict to simple object
+                # Convert dict to simple object with ALL available data
                 class PersonObj:
                     def __init__(self, d):
                         self.name = d.get('name', 'Unknown')
                         self.title = d.get('title', 'Unknown')
                         self.linkedin_url = d.get('linkedin_url')
                         self.source = d.get('source', 'unknown')
+                        self.confidence_score = d.get('confidence_score', 0.5)
+                        self.department = d.get('department')
+                        self.location = d.get('location')
+                        self.experience_years = d.get('experience_years')
+                        self.skills = d.get('skills', [])
+                        self.email = d.get('email')
+                        self.twitter_url = d.get('twitter_url')
+                        self.github_url = d.get('github_url')
                 
                 categories_display[category] = [PersonObj(p) for p in people_list]
         
