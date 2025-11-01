@@ -441,21 +441,9 @@ def search():
                                      categories={})
     
     try:
-        # Find connections (with timeout protection)
-        import signal
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Search took too long")
-        
-        # Set 30 second timeout
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(30)
-        
-        try:
-            finder = ConnectionFinder()
-            results = finder.find_connections(company=company, title=role)
-        finally:
-            signal.alarm(0)  # Cancel timeout
+        # Find connections (Render has its own timeout protection)
+        finder = ConnectionFinder()
+        results = finder.find_connections(company=company, title=role)
         
         # Extract results
         total_found = results.get('total_found', 0)
@@ -496,5 +484,6 @@ if __name__ == '__main__':
     # Get port from environment (for Render) or use 8000 (5000 blocked by macOS AirPlay)
     port = int(os.environ.get('PORT', 8000))
     # Run with host 0.0.0.0 so it's accessible externally
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Debug mode disabled for production (signal issues in worker threads)
+    app.run(host='0.0.0.0', port=port, debug=False)
 
