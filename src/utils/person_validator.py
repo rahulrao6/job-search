@@ -163,17 +163,19 @@ class PersonValidator:
         
         A person should have at least:
         - Name (always required)
-        - Either: LinkedIn URL OR title
+        - Either: LinkedIn URL OR title OR GitHub URL OR evidence URL
         """
         # Must have name (always)
         if not person.name or len(person.name) < 3:
             return True
         
-        # Must have either LinkedIn OR title
+        # Must have at least one of these
         has_linkedin = bool(person.linkedin_url)
         has_title = bool(person.title and len(person.title) > 3)
+        has_github = bool(getattr(person, 'github_url', None))
+        has_evidence = bool(getattr(person, 'evidence_url', None))
         
-        if not (has_linkedin or has_title):
+        if not (has_linkedin or has_title or has_github or has_evidence):
             return True
         
         return False

@@ -11,8 +11,12 @@ import requests
 import time
 from typing import List, Optional
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 from src.models.person import Person
+
+# Load environment variables
+load_dotenv()
 
 
 class ActuallyWorkingFreeSources:
@@ -36,6 +40,7 @@ class ActuallyWorkingFreeSources:
         self.google_api_key = os.getenv('GOOGLE_API_KEY')
         self.bing_api_key = os.getenv('BING_SEARCH_KEY')
         self.github_token = os.getenv('GITHUB_TOKEN')  # Optional but increases limits
+        self.cost_per_search = 0.0  # Free sources!
         
     def search_all(self, company: str, title: str = None, max_results: int = 50) -> List[Person]:
         """
@@ -117,16 +122,20 @@ class ActuallyWorkingFreeSources:
         """
         people = []
         
-        query = f'"{company}"'
+        # Build search query - more flexible for small companies
+        query = f'site:linkedin.com/in/ {company}'
         if title:
-            query += f' "{title}"'
+            query += f' {title}'
         
         url = "https://www.googleapis.com/customsearch/v1"
+        
+        # First request
         params = {
             'key': self.google_api_key,
             'cx': self.google_cse_id,
             'q': query,
             'num': 10,  # Max per request
+            'start': 1,
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -239,9 +248,14 @@ class ActuallyWorkingFreeSources:
         
         # Search users by company in bio (single API call)
         url = "https://api.github.com/search/users"
+        
+        # Build more flexible query for better results
+        company_query = company.replace(' ', '+')
         params = {
-            'q': f'"{company}" in:bio type:user',
-            'per_page': 100  # Max allowed
+            'q': f'{company_query} in:bio type:user',  # Removed quotes for flexibility
+            'per_page': 100,  # Max allowed
+            'sort': 'joined',  # Get newest members first
+            'order': 'desc'
         }
         
         try:
@@ -396,6 +410,34 @@ class ActuallyWorkingFreeSources:
         # Try .com
         clean = company_lower.replace(' ', '').replace(',', '').replace('.', '')
         return f"{clean}.com"
+    
+    def search_people(self, company: str, title: str = None, **kwargs) -> List[Person]:
+        """
+        Search for people - compatible with orchestrator interface.
+        
+        Args:
+            company: Company name
+            title: Job title (optional)
+            **kwargs: Additional parameters (ignored)
+            
+        Returns:
+            List of Person objects
+        """
+        # Use our main search method
+        return self.search_all(company, title, max_results=kwargs.get('max_results', 50))
+    
+    def is_configured(self) -> bool:
+        """
+        Check if at least one source is configured.
+        
+        Returns:
+            True if Google CSE, Bing API, or GitHub token is available
+        """
+        return bool(
+            (self.google_cse_id and self.google_api_key) or 
+            self.bing_api_key or 
+            self.github_token
+        )
 
 
 def test_working_sources():

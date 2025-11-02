@@ -112,6 +112,67 @@ HOME_TEMPLATE = """
             color: #999;
             font-size: 12px;
         }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(102, 126, 234, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+        }
+        .loading-content {
+            text-align: center;
+            color: white;
+            padding: 20px;
+            max-width: 400px;
+        }
+        .loading-content h2 {
+            font-size: 24px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        .loading-content p {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 25px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-dots {
+            display: inline-block;
+            margin-left: 5px;
+        }
+        .progress-dots span {
+            animation: blink 1.4s infinite both;
+            font-size: 20px;
+        }
+        .progress-dots span:nth-child(2) {
+            animation-delay: .2s;
+        }
+        .progress-dots span:nth-child(3) {
+            animation-delay: .4s;
+        }
+        @keyframes blink {
+            0%, 60%, 100% { opacity: 0.3; }
+            30% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -136,9 +197,11 @@ HOME_TEMPLATE = """
         <div id="loading" class="loading-overlay" style="display: none;">
             <div class="loading-content">
                 <div class="spinner"></div>
-                <h2>Finding Connections...</h2>
-                <p>Searching GitHub, LinkedIn, and company pages</p>
-                <p style="font-size: 12px; margin-top: 10px;">This may take 10-20 seconds</p>
+                <h2>Finding Connections<span class="progress-dots"><span>.</span><span>.</span><span>.</span></span></h2>
+                <p>🔍 Searching free sources first</p>
+                <p>📊 Google CSE • GitHub API • Company Pages</p>
+                <p style="font-size: 14px; margin-top: 15px; opacity: 0.8;">⏱️ This typically takes 10-20 seconds</p>
+                <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">💡 Tip: We prioritize free APIs to keep costs at $0</p>
             </div>
         </div>
         
@@ -234,28 +297,60 @@ RESULTS_TEMPLATE = """
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(102, 126, 234, 0.9);
+            background: rgba(102, 126, 234, 0.95);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 9999;
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
         }
         .loading-content {
             text-align: center;
             color: white;
+            padding: 20px;
+            max-width: 400px;
+        }
+        .loading-content h2 {
+            font-size: 24px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        .loading-content p {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 10px;
         }
         .spinner {
             border: 4px solid rgba(255,255,255,0.3);
             border-top: 4px solid white;
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            margin: 0 auto 25px;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        .progress-dots {
+            display: inline-block;
+            margin-left: 5px;
+        }
+        .progress-dots span {
+            animation: blink 1.4s infinite both;
+            font-size: 20px;
+        }
+        .progress-dots span:nth-child(2) {
+            animation-delay: .2s;
+        }
+        .progress-dots span:nth-child(3) {
+            animation-delay: .4s;
+        }
+        @keyframes blink {
+            0%, 60%, 100% { opacity: 0.3; }
+            30% { opacity: 1; }
         }
         .category {
             margin-bottom: 30px;

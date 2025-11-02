@@ -31,28 +31,27 @@ class ConnectionFinder:
     Coordinates all data sources, aggregation, and categorization.
     """
     
-    # Source quality scores (higher = better data quality) - UPDATED FOR ELITE SOURCES
+    # Source quality scores (higher = better data quality)
     SOURCE_QUALITY_SCORES = {
-        # Elite Sources (Primary)
-        'elite_orchestrator': 0.9,    # Best free solution: API + Selenium hybrid
-        'google_cse': 0.85,           # Google Custom Search via elite orchestrator
-        'bing_api': 0.8,              # Bing Web Search via elite orchestrator
-        'duckduckgo_selenium': 0.75,  # DuckDuckGo via production Selenium
-        'github_api': 0.7,            # Enhanced GitHub API via elite orchestrator
-        'company_selenium': 0.65,     # Company pages via production Selenium
-        'startpage_selenium': 0.7,    # Startpage via production Selenium
-        
-        # Premium APIs (Backup)
+        # Premium APIs (Best quality, but paid)
         'google_serp': 1.0,           # Best: SerpAPI with LinkedIn URLs + metadata
-        'serpapi': 1.0,               # SerpAPI variant
-        'apollo': 0.9,                # Good: Professional database
+        'apollo': 0.95,               # Professional database with verified data
         
-        # Legacy Sources (Fallback only)
-        'github_legacy': 0.3,         # Basic GitHub (minimal metadata)
-        'github': 0.3,                # Legacy GitHub scraper
+        # Elite Free Sources (Great quality, FREE!)
+        'elite_free': 0.85,           # Our combined free sources
+        'google_cse': 0.85,           # Google Custom Search (100/day free)
+        'bing_api': 0.8,              # Bing Web Search API (1000/month free)
+        'github': 0.7,                # GitHub API (5000/hour with token)
+        'github_legacy': 0.7,         # GitHub org members
         
-        # Deprecated/Disabled Sources
-        'company_pages': 0.2,         # Old company scraper (mostly broken)
+        # Company websites and other sources
+        'company_pages': 0.6,         # Direct company website scraping
+        'company_website': 0.6,       # Company team pages
+        
+        # Default for unknown sources
+        'unknown': 0.5,
+        
+        # Deprecated/Broken sources
         'twitter': 0.1,               # Broken (Nitter down)
         'wellfound': 0.1,             # Broken (not finding companies)
         'crunchbase': 0.1,            # Broken (403 Forbidden)
@@ -122,8 +121,20 @@ class ConnectionFinder:
         aggregator = PeopleAggregator()
         categorizer = PersonCategorizer(target_title=title)
         
-        # Run each enabled source
-        for source_name, source_instance in self.sources.items():
+        # Waterfall approach: Free sources first, then paid if needed
+        free_sources = ['elite_free', 'github_legacy']
+        paid_sources = ['google_serp', 'apollo']
+        min_people_threshold = 20  # Target minimum
+        
+        # Phase 1: Run FREE sources first
+        print("\n🆓 Phase 1: Free Sources (Cost: $0)")
+        print("-" * 40)
+        
+        for source_name in free_sources:
+            if source_name not in self.sources:
+                continue
+                
+            source_instance = self.sources[source_name]
             source_config = self.config['sources'].get(source_name, {})
             
             if not source_config.get('enabled', True):
@@ -151,6 +162,49 @@ class ConnectionFinder:
                 
             except Exception as e:
                 print(f"⚠️  {source_name} error: {e}")
+        
+        # Check if we have enough people
+        current_count = len(aggregator.get_all())
+        print(f"\n📊 Free sources found: {current_count} people")
+        
+        # Phase 2: Only use paid sources if we need more results
+        if current_count < min_people_threshold:
+            print(f"\n💳 Phase 2: Premium Sources (Need {min_people_threshold - current_count} more)")
+            print("-" * 40)
+            
+            for source_name in paid_sources:
+                if source_name not in self.sources:
+                    continue
+                    
+                source_instance = self.sources[source_name]
+                source_config = self.config['sources'].get(source_name, {})
+                
+                if not source_config.get('enabled', True):
+                    print(f"⊘ {source_name}: disabled")
+                    continue
+                
+                # Check if source requires auth and is configured
+                if hasattr(source_instance, 'is_configured'):
+                    if not source_instance.is_configured():
+                        print(f"⊘ {source_name}: not configured (missing API key)")
+                        continue
+                
+                print(f"\n▶ Running {source_name}...")
+                
+                try:
+                    people = source_instance.search_people(company, title)
+                    
+                    if people:
+                        aggregator.add_batch(people)
+                        # Check if we have enough now
+                        if len(aggregator.get_all()) >= min_people_threshold:
+                            print(f"✓ Reached threshold ({min_people_threshold}+ people), stopping paid searches")
+                            break
+                    
+                except Exception as e:
+                    print(f"⚠️  {source_name} error: {e}")
+        else:
+            print(f"✅ Sufficient results from free sources! Skipping paid APIs.")
         
         # Get all unique people
         all_people = aggregator.get_all()
@@ -222,16 +276,17 @@ class ConnectionFinder:
         """
         sources = {}
         
-        # Tier 1: ELITE SOURCES ORCHESTRATOR (Primary - handles 80%+ of use cases)
+        # Tier 1: Free API Sources (Primary - handles most use cases)
         try:
-            from src.scrapers.elite_sources_integration import EliteSourcesAdapter
-            sources['elite_orchestrator'] = EliteSourcesAdapter()  # Quality: 0.9 - Best free solution
-            print("🚀 Elite Sources Orchestrator loaded - expect 200-500+ results per search")
-        except ImportError as e:
-            print(f"⚠️  Elite orchestrator not available: {e}")
-            # Fallback to basic API sources
             from src.scrapers.actually_working_free_sources import ActuallyWorkingFreeSources
-            sources['elite_free'] = ActuallyWorkingFreeSources()
+            elite_free = ActuallyWorkingFreeSources()
+            if elite_free.is_configured():
+                sources['elite_free'] = elite_free  # Quality: 0.9 - Best free solution
+                print("🚀 Elite free sources loaded (Google CSE, GitHub API, Company Pages)")
+            else:
+                print("⚠️  Free sources not configured - add GOOGLE_API_KEY and GOOGLE_CSE_ID to .env")
+        except ImportError as e:
+            print(f"⚠️  Free sources not available: {e}")
         
         # Tier 2: Premium APIs (enhancement/backup)
         sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0 - Best results (paid)
