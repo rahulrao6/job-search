@@ -22,17 +22,41 @@ from src.api.middleware import handle_api_errors
 app = Flask(__name__)
 
 # Configure CORS
-# Explicitly allow localhost:3000 for development, plus any FRONTEND_URL env var
-frontend_url = os.getenv('FRONTEND_URL')
-allowed_origins = ['http://localhost:3000', 'http://127.0.0.1:3000']
-if frontend_url and frontend_url != '*':
-    allowed_origins.append(frontend_url)
+# Allow localhost for development, Vercel domains, and FRONTEND_URL env var
+
+def cors_origin_check(origin):
+    """Check if origin is allowed"""
+    if not origin:
+        return False
+    
+    # Allow localhost for development
+    if origin.startswith('http://localhost:') or origin.startswith('http://127.0.0.1:'):
+        return True
+    
+    # Allow all Vercel deployments (*.vercel.app)
+    if '.vercel.app' in origin:
+        return True
+    
+    # Check FRONTEND_URL environment variable
+    frontend_url = os.getenv('FRONTEND_URL')
+    if frontend_url:
+        if frontend_url == '*':
+            return True  # Allow all origins
+        if origin == frontend_url or origin.startswith(frontend_url):
+            return True
+    
+    # Allow your specific frontend
+    if origin == 'https://frontend-job-drab.vercel.app':
+        return True
+    
+    return False
 
 CORS(app, 
-     origins=allowed_origins,
+     origins=cors_origin_check,  # Function-based origin check
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-     allow_headers=['Authorization', 'Content-Type', 'X-Requested-With'],
-     supports_credentials=True)
+     allow_headers=['Authorization', 'Content-Type', 'X-Requested-With', 'Accept'],
+     supports_credentials=True,
+     expose_headers=['Content-Type', 'Authorization'])
 
 # Register error handlers
 handle_api_errors(app)
