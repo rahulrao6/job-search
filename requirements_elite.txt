@@ -1,0 +1,27 @@
+# Elite Scraping System Requirements
+# Base requirements for API sources (always needed)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pydantic>=1.10.0
+python-dotenv>=1.0.0
+PyYAML>=6.0
+
+# Selenium requirements (for enhanced scraping - optional but recommended)
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+undetected-chromedriver>=3.5.3
+
+# Additional utilities
+diskcache>=5.6.0  # For caching
+ratelimit>=2.2.1  # For rate limiting
+
+# Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Web app dependencies (if using)
+flask>=2.3.0
+gunicorn>=21.2.0
+
+# Production deployment
+psutil>=5.9.0  # For system monitoring

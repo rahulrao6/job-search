@@ -61,53 +61,16 @@ print('✅ Working!' if r.status_code == 200 else f'❌ Error: {r.status_code}')
 "
 ```
 
-### 2. Bing Web Search API (10 min) - HIGH IMPACT
+### 2. Bing Web Search API - DEPRECATED ⚠️
 
-**What it does**: Returns LinkedIn profiles from Bing's index
-**Results**: 20-50 LinkedIn profiles per search
-**Limit**: 1000 searches/month FREE
+**Update**: Microsoft has deprecated the free tier of Bing Search API.
 
-#### Setup Steps:
+**Alternative**: Google Custom Search Engine (above) provides similar functionality and is still free.
 
-```bash
-# 1. Create Azure Account (if you don't have one)
-#    Go to: https://portal.azure.com/
-#    Sign up (free account, no credit card for free tier)
-
-# 2. Create Bing Search Resource
-#    In Azure Portal, click "Create a resource"
-#    Search for "Bing Search v7"
-#    Click "Create"
-#    Subscription: Your subscription
-#    Resource Group: Create new → "job-search-rg"
-#    Region: (any, choose closest)
-#    Name: "job-search-bing"
-#    Pricing tier: F0 (FREE)
-#    Click "Review + Create" → "Create"
-
-# 3. Get API Key
-#    Once deployed, click "Go to resource"
-#    Left menu: "Keys and Endpoint"
-#    Copy "KEY 1"
-
-# 4. Add to .env
-echo "BING_SEARCH_KEY=paste_your_key_here" >> .env
-```
-
-**Test it:**
-```bash
-python -c "
-import os
-os.environ['BING_SEARCH_KEY'] = 'your_key'
-
-import requests
-url = 'https://api.bing.microsoft.com/v7.0/search'
-headers = {'Ocp-Apim-Subscription-Key': os.environ['BING_SEARCH_KEY']}
-params = {'q': 'test'}
-r = requests.get(url, headers=headers, params=params)
-print('✅ Working!' if r.status_code == 200 else f'❌ Error: {r.status_code}')
-"
-```
+If you need more searches beyond Google CSE's 100/day:
+- Upgrade Google CSE to paid tier ($5 per 1000 searches)
+- Use SerpAPI ($50/month for 5000 searches)
+- Use multiple Google accounts for multiple CSEs (not recommended)
 
 ### 3. GitHub Token (2 min) - OPTIONAL
 

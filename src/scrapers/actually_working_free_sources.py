@@ -58,7 +58,7 @@ class ActuallyWorkingFreeSources:
         else:
             print("  ⊘ Google CSE not configured (set GOOGLE_CSE_ID + GOOGLE_API_KEY)")
         
-        # Priority 2: Bing Search API (if configured)
+        # Priority 2: Bing Search API (DEPRECATED - kept for backward compatibility)
         if self.bing_api_key:
             print("  → Bing Web Search API...")
             try:
@@ -68,7 +68,7 @@ class ActuallyWorkingFreeSources:
             except Exception as e:
                 print(f"    ✗ Error: {str(e)[:50]}")
         else:
-            print("  ⊘ Bing API not configured (set BING_SEARCH_KEY)")
+            print("  ⊘ Bing API deprecated (use Google CSE instead)")
         
         # Priority 3: GitHub (always works, no API key required)
         print("  → GitHub API...")
