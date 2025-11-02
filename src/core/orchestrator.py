@@ -38,14 +38,16 @@ class ConnectionFinder:
         'google_serp': 1.0,           # Best: SerpAPI with LinkedIn URLs + metadata
         'apollo': 0.95,               # Professional database with verified data
         
-        # Elite Free Sources (Great quality, FREE!)
-        'elite_free': 0.85,           # Our combined free sources
-        'google_cse': 0.85,           # Google Custom Search (100/day free)
-        'bing_api': 0.8,              # Bing Web Search API (1000/month free)
-        'github': 0.7,                # GitHub API (5000/hour with token)
-        'github_legacy': 0.7,         # GitHub org members
+        # High Quality Free Sources (LinkedIn profiles with titles)
+        'google_cse': 0.9,            # Google Custom Search - LinkedIn profiles
+        'bing_api': 0.85,             # Bing Web Search API - LinkedIn profiles
         
-        # Company websites and other sources
+        # Combined sources
+        'elite_free': 0.8,            # Our combined free sources
+        
+        # Low Quality Sources (minimal professional info)
+        'github': 0.2,                # GitHub API - just usernames, no titles
+        'github_legacy': 0.2,         # GitHub org members - no professional info
         'company_pages': 0.6,         # Direct company website scraping
         'company_website': 0.6,       # Company team pages
         
@@ -126,10 +128,10 @@ class ConnectionFinder:
         aggregator = PeopleAggregator()
         categorizer = PersonCategorizer(target_title=title)
         
-        # Waterfall approach: Free sources first, then paid if needed
-        free_sources = ['elite_free', 'github_legacy']
+        # Waterfall approach: Quality sources first
+        free_sources = ['elite_free']  # Only quality free sources (Google CSE, etc.)
         paid_sources = ['google_serp', 'apollo']
-        min_people_threshold = 15  # Reduced for speed
+        min_people_threshold = 10  # Focus on quality over quantity
         
         # Phase 1: Run FREE sources first
         print("\n🆓 Phase 1: Free Sources (Cost: $0)")
@@ -168,9 +170,16 @@ class ConnectionFinder:
             except Exception as e:
                 print(f"⚠️  {source_name} error: {e}")
         
-        # Check if we have enough people
-        current_count = len(aggregator.get_all())
-        print(f"\n📊 Free sources found: {current_count} people")
+        # Check if we have enough QUALITY people (LinkedIn profiles)
+        all_people = aggregator.get_all()
+        quality_people = [p for p in all_people if p.source not in ['github', 'github_legacy']]
+        github_people = [p for p in all_people if p.source in ['github', 'github_legacy']]
+        current_count = len(quality_people)
+        github_count = len(github_people)
+        
+        print(f"\n📊 Free sources found:")
+        print(f"  - Quality results (LinkedIn profiles): {current_count} people")
+        print(f"  - GitHub results (for enrichment): {github_count} people")
         
         # Check if we have time for paid sources
         elapsed_time = time.time() - start_time
@@ -308,9 +317,9 @@ class ConnectionFinder:
         sources['github_legacy'] = GitHubScraper()      # Quality: 0.3 - Basic fallback
         
         print(f"📊 Initialized {len(sources)} data sources")
-        print("   Primary: Elite Sources Orchestrator (API + Selenium)")
+        print("   Primary: Google CSE (LinkedIn profiles)")
+        print("   Secondary: GitHub (usernames for enrichment)")
         print("   Backup: Paid APIs (SerpAPI, Apollo)")
-        print("   Fallback: Legacy GitHub")
         
         return sources
     

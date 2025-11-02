@@ -75,12 +75,12 @@ class ActuallyWorkingFreeSources:
         else:
             print("  ⊘ Bing API deprecated (use Google CSE instead)")
         
-        # Priority 3: GitHub (always works, no API key required)
-        print("  → GitHub API...")
+        # Priority 3: GitHub - LOW QUALITY (usernames only, for future enrichment)
+        print("  → GitHub API (low quality - usernames only)...")
         try:
             people = self._search_github(company)
             new = self._add_unique(people, seen_urls, all_people)
-            print(f"    ✓ Found {new} profiles")
+            print(f"    ✓ Found {new} profiles (will be deprioritized)")
         except Exception as e:
             print(f"    ✗ Error: {str(e)[:50]}")
         

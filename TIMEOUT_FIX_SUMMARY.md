@@ -31,9 +31,15 @@
 
 ## Results
 - Search time: ~40s → ~20-25s ✅
-- Still returns quality results (20-50+ people)
+- Returns QUALITY results (10-30+ LinkedIn profiles)
 - Stays within Render's 30-second limit
 - No more 502 errors!
+
+## Quality Improvements (Latest)
+- **GitHub deprioritized (not removed)** - Included for enrichment but sorted last
+- **LinkedIn profiles shown first** - Quality score 0.9 vs GitHub 0.2
+- **Ready for enrichment** - GitHub results can be enriched via Clay/APIs later
+- **Best of both worlds** - Quality results first, enrichment data available
 
 ## If You Still Get Timeouts
 
@@ -46,12 +52,34 @@
 
 If you need more comprehensive results and don't mind longer searches:
 
-1. **Company website search**: Uncomment lines 87-98 in `actually_working_free_sources.py`
+1. **GitHub user search**: Uncomment lines 82-88 in `actually_working_free_sources.py`
+   - Only recommended for developer-heavy companies
+   - Will return usernames without job titles
+
 2. **GitHub org members**: Uncomment lines 303-329 in `actually_working_free_sources.py`
-3. **Increase timeouts**: Change all `timeout=5` back to `timeout=10`
-4. **More results**: Change `per_page` limits back to higher values
+   - Returns confirmed employees but no professional info
+
+3. **Company website search**: Uncomment lines 92-98 in `actually_working_free_sources.py`
+   - Can find team pages with real names and titles
+
+4. **Increase timeouts**: Change all `timeout=5` back to `timeout=10`
+5. **More results**: Change `per_page` limits back to higher values
 
 Note: These will likely cause timeouts on Render free tier!
+
+## Quality vs Quantity Trade-off
+
+**Current setup (Quality-first):**
+- ✅ 10-30 LinkedIn profiles with full professional data
+- ✅ Ready for immediate outreach
+- ✅ Higher response rates
+- ❌ Fewer total results
+
+**With GitHub enabled (Quantity-first):**
+- ✅ 50-100+ total results
+- ❌ Most are just GitHub usernames
+- ❌ No job titles or LinkedIn profiles
+- ❌ Harder to reach out professionally
 
 ## Deployment Commands
 

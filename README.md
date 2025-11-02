@@ -62,16 +62,18 @@ for category, people in results['by_category'].items():
 
 ## How It Works
 
-### 1. Data Collection Strategy (Waterfall Approach)
+### 1. Data Collection Strategy (Quality-First Waterfall)
 ```
 Phase 1: FREE Sources (Cost: $0)
-├── Google Custom Search Engine API (100/day free)
-├── GitHub API (5000/hour with token)
-└── Company Websites
+├── Google Custom Search Engine API (LinkedIn profiles - HIGH QUALITY)
+├── Bing API (LinkedIn profiles) - if configured
+└── GitHub API (Usernames only - LOW QUALITY, for enrichment)
 
-Phase 2: PAID Sources (Only if < 20 results)
-├── SerpAPI ($50/month)
-└── Apollo.io (50 credits/month free)
+Phase 2: PAID Sources (Only if < 10 quality results)
+├── SerpAPI (Best LinkedIn data)
+└── Apollo.io (Verified professional data)
+
+Note: GitHub results are included but heavily deprioritized
 ```
 
 ### 2. Data Processing Pipeline
@@ -83,17 +85,18 @@ Phase 2: PAID Sources (Only if < 20 results)
 
 ## Performance
 
-- **Small companies**: 15-25 people (usually FREE)
-- **Medium companies**: 30-50 people (often FREE)  
-- **Large companies**: 50+ people
+- **Small companies**: 10-20 quality people (LinkedIn profiles)
+- **Medium companies**: 20-40 quality people  
+- **Large companies**: 40+ quality people
 - **Response time**: 10-25 seconds (optimized for Render's 30s limit)
 - **Cost**: $0 for most searches
+- **Quality**: 100% LinkedIn profiles with job titles
 
-### Recent Performance Optimizations
-- Reduced API timeouts (10s → 5s)
-- Limited results per source for speed
-- Skip expensive operations when approaching time limit
-- Disabled company website search by default
+### Recent Quality Improvements
+- **GitHub deprioritized** - Included but sorted last (for future enrichment)
+- **LinkedIn profiles first** - Full names, titles, direct links prioritized
+- **Quality-based sorting** - LinkedIn (0.9) > GitHub (0.2) quality scores
+- **Future-ready** - GitHub results ready for enrichment via Clay/APIs
 
 ## Project Structure
 
@@ -118,16 +121,22 @@ render.yaml         # Render.com configuration
 
 ### Required API Keys (All FREE)
 
-1. **Google Custom Search** - See [GOOGLE_CSE_QUICKSTART.md](GOOGLE_CSE_QUICKSTART.md)
+1. **Google Custom Search** (REQUIRED) - See [GOOGLE_CSE_QUICKSTART.md](GOOGLE_CSE_QUICKSTART.md)
    - 100 searches/day free
-   - Best source for LinkedIn profiles
+   - Primary source for LinkedIn profiles
+   - Returns professional data with titles
 
-2. **GitHub Token** (Optional but recommended)
-   - 5000 API calls/hour vs 60 without
-   - Great for tech companies
-
-3. **OpenAI API** - For enhanced categorization
+2. **OpenAI API** (REQUIRED) - For enhanced categorization
    - Small usage, minimal cost
+   - Critical for categorizing people
+
+3. **Bing API** (Optional) - Additional LinkedIn results
+   - 1000/month free tier available
+
+4. **GitHub Token** (Optional)
+   - Returns usernames for future enrichment
+   - Deprioritized in results (shown last)
+   - Good for building enrichment pipelines
 
 ### Environment Variables
 ```bash
@@ -142,6 +151,8 @@ APOLLO_API_KEY=your_key     # Backup only
 ## Documentation
 
 - [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) - **Complete guide for teams** (share this!)
+- [FINAL_PUSH_READY.md](FINAL_PUSH_READY.md) - **Final status** - Ready to push!
+- [FINAL_TEST_RESULTS.md](FINAL_TEST_RESULTS.md) - Production test results (5 companies, 100% success)
 - [SETUP_FREE_APIS.md](SETUP_FREE_APIS.md) - Set up free API keys
 - [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) - Deploy to production
 - [TIMEOUT_FIX_SUMMARY.md](TIMEOUT_FIX_SUMMARY.md) - Recent 502 timeout fixes

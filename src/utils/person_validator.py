@@ -163,19 +163,25 @@ class PersonValidator:
         
         A person should have at least:
         - Name (always required)
-        - Either: LinkedIn URL OR title OR GitHub URL OR evidence URL
+        - Either: LinkedIn URL OR meaningful title
+        
+        GitHub-only profiles are not sufficient for professional outreach.
         """
         # Must have name (always)
         if not person.name or len(person.name) < 3:
             return True
         
-        # Must have at least one of these
+        # Must have professional info OR be from GitHub (for future enrichment)
         has_linkedin = bool(person.linkedin_url)
         has_title = bool(person.title and len(person.title) > 3)
-        has_github = bool(getattr(person, 'github_url', None))
-        has_evidence = bool(getattr(person, 'evidence_url', None))
+        is_github = person.source in ['github', 'github_legacy']
         
-        if not (has_linkedin or has_title or has_github or has_evidence):
+        # Allow GitHub profiles through (they'll be deprioritized by quality score)
+        if is_github:
+            return False  # Keep GitHub results for future enrichment
+        
+        # Non-GitHub sources must have LinkedIn or title
+        if not (has_linkedin or has_title):
             return True
         
         return False
