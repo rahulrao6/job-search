@@ -1,15 +1,7 @@
-"""Elite scraper fleet for free people discovery"""
+"""
+Scraper modules for various data sources
+"""
 
-from .base_scraper import BaseSearchScraper
-from .google_scraper import GoogleScraper
-from .bing_scraper import BingScraper
-from .duckduckgo_scraper import DuckDuckGoScraper
-from .scraper_fleet import ScraperFleet
+from .actually_working_free_sources import ActuallyWorkingFreeSources
 
-__all__ = [
-    'BaseSearchScraper',
-    'GoogleScraper',
-    'BingScraper', 
-    'DuckDuckGoScraper',
-    'ScraperFleet',
-]
+__all__ = ['ActuallyWorkingFreeSources']

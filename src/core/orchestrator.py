@@ -193,31 +193,33 @@ class ConnectionFinder:
     
     def _initialize_sources(self) -> Dict:
         """
-        Initialize data sources - only what actually works in production.
+        Initialize data sources - ELITE FREE SOURCES + paid backups.
         
-        Current state:
-        - SerpAPI/Apollo: Work well but cost money
-        - GitHub: Works but limited metadata
-        - Others: Currently broken, disabled until fixed
+        Strategy:
+        1. Free APIs first (Google CSE, Bing API, GitHub)
+        2. Paid APIs as backup (SerpAPI, Apollo)
+        3. Direct scraping as last resort
         
-        Future improvements tracked in FREE_SOURCES_STRATEGY.md
+        Setup: See SETUP_FREE_APIS.md (5 minutes, $0/month)
         """
         sources = {}
         
-        # Tier 1: Premium APIs (best quality, cost money)
-        sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0 - Best results
-        sources['apollo'] = ApolloClient()              # Quality: 0.9 - Professional data
+        # Tier 0: ELITE FREE SOURCES (with API keys)
+        from src.scrapers.actually_working_free_sources import ActuallyWorkingFreeSources
+        sources['elite_free'] = ActuallyWorkingFreeSources()  # Quality: 0.85 - Free but excellent
         
-        # Tier 2: Free sources that actually work
-        sources['github'] = GitHubScraper()             # Quality: 0.4 - Limited but free
+        # Tier 1: Paid APIs (backup/enhancement)
+        sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0 - Best results (paid)
+        sources['apollo'] = ApolloClient()              # Quality: 0.9 - Professional data (paid)
         
-        # Tier 3: Free sources that need fixing (disabled for now)
-        # TODO: Fix these in V2
-        # sources['free_linkedin'] = RealWorkingScraper()  # Currently returns 0
-        # sources['company_pages'] = CompanyPagesScraper() # Most domains don't have /team
-        # sources['twitter'] = TwitterSearchScraper()      # Nitter instances down
-        # sources['wellfound'] = WellfoundScraper()       # Not finding companies
-        # sources['crunchbase'] = CrunchbaseScraper()     # 403 Forbidden
+        # Tier 2: Legacy free sources (keep for fallback)
+        sources['github'] = GitHubScraper()             # Quality: 0.4 - Limited but always works
+        
+        # Note: Elite free sources handle:
+        # - Google Custom Search Engine (100/day free)
+        # - Bing Web Search API (1000/month free)
+        # - GitHub API (5000/hour free)
+        # - Company websites
         
         return sources
     
