@@ -11,7 +11,7 @@ pip install --upgrade pip && pip install -r requirements.txt
 
 **Start Command:**
 ```bash
-gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 web_app:app
+gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 30 web_app:app
 ```
 
 ### 2. Required Environment Variables
@@ -48,7 +48,7 @@ Add these in Render.com dashboard:
 - **Medium companies**: 30-50 people  
 - **Large companies**: 50-100+ people
 - **Cost**: $0 for most searches (free APIs)
-- **Response time**: 10-20 seconds
+- **Response time**: 10-25 seconds (optimized for 30s timeout)
 
 ### 5. Monitoring
 
@@ -60,7 +60,15 @@ Check Render.com logs for:
 
 ### 6. Troubleshooting
 
-**502 Bad Gateway:**
+**502 Bad Gateway / Timeout after 30 seconds:**
+- This is Render.com's 30-second HTTP timeout limit
+- Our system is optimized to complete searches within 25 seconds
+- If timeouts persist:
+  - Check if APIs are responding slowly
+  - Reduce search scope (more specific job titles)
+  - Ensure you're not hitting rate limits
+
+**502 Bad Gateway (immediate):**
 - Ensure gunicorn is in requirements.txt ✅
 - Check build logs for pip install errors
 - Verify Python version compatibility
@@ -93,15 +101,20 @@ gunicorn --bind 0.0.0.0:8000 web_app:app
 - `src/scrapers/actually_working_free_sources.py` - Free API integrations
 - `src/utils/person_validator.py` - False positive removal
 
-## Recent Changes
+## Recent Changes (Latest: Timeout Fix)
 
-1. Fixed gunicorn installation in render.yaml
-2. Added runtime.txt for Python version
-3. Optimized search queries for better results
-4. Implemented waterfall approach (free first, then paid)
-5. Added loading animation with progress indicators
-6. Enhanced person validation to reduce false positives
-7. Improved GitHub search flexibility
+1. **CRITICAL FIX: Optimized for 30-second timeout**
+   - Reduced all API timeouts from 10s to 5s
+   - Limited results per source for speed
+   - Skip expensive operations if running low on time
+   - Changed gunicorn timeout to 30s to match Render's limit
+2. Fixed gunicorn installation in render.yaml
+3. Added runtime.txt for Python version
+4. Optimized search queries for better results
+5. Implemented waterfall approach (free first, then paid)
+6. Added loading animation with progress indicators
+7. Enhanced person validation to reduce false positives
+8. Improved GitHub search flexibility
 
 ## Cost Analysis
 

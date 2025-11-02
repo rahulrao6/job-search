@@ -2,6 +2,7 @@
 
 import os
 import yaml
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 from src.models.person import Person, PersonCategory
@@ -103,6 +104,10 @@ class ConnectionFinder:
         print(f"\n🔍 Finding connections for {title} at {company}...")
         print("=" * 60)
         
+        # Track start time for timeout management
+        start_time = time.time()
+        max_search_time = 25  # Leave 5 seconds buffer for processing
+        
         # Check cache
         cache_key = {"company": company, "title": title}
         if use_cache:
@@ -124,7 +129,7 @@ class ConnectionFinder:
         # Waterfall approach: Free sources first, then paid if needed
         free_sources = ['elite_free', 'github_legacy']
         paid_sources = ['google_serp', 'apollo']
-        min_people_threshold = 20  # Target minimum
+        min_people_threshold = 15  # Reduced for speed
         
         # Phase 1: Run FREE sources first
         print("\n🆓 Phase 1: Free Sources (Cost: $0)")
@@ -167,8 +172,11 @@ class ConnectionFinder:
         current_count = len(aggregator.get_all())
         print(f"\n📊 Free sources found: {current_count} people")
         
-        # Phase 2: Only use paid sources if we need more results
-        if current_count < min_people_threshold:
+        # Check if we have time for paid sources
+        elapsed_time = time.time() - start_time
+        
+        # Phase 2: Only use paid sources if we need more results AND have time
+        if current_count < min_people_threshold and elapsed_time < 15:  # Only if < 15 seconds elapsed
             print(f"\n💳 Phase 2: Premium Sources (Need {min_people_threshold - current_count} more)")
             print("-" * 40)
             
@@ -215,12 +223,16 @@ class ConnectionFinder:
         validated_people = validator.validate_batch(all_people)
         print(f"✓ Kept {len(validated_people)} valid people (filtered {len(all_people) - len(validated_people)} false positives)")
         
-        # Use OpenAI to enhance if available (increased limit for production)
+        # Use OpenAI to enhance if available (but skip if running out of time)
+        elapsed_time = time.time() - start_time
         enhancer = get_openai_enhancer()
-        if enhancer.enabled and validated_people:
-            print(f"\n▶ Using OpenAI to enhance data (up to 50 people)...")
-            # Enhance more people in production for better categorization
-            validated_people = enhancer.enhance_batch(validated_people, title, max_enhance=50)
+        if enhancer.enabled and validated_people and elapsed_time < 20:
+            # Limit enhancement based on time remaining
+            max_enhance = 20 if elapsed_time < 15 else 10
+            print(f"\n▶ Using OpenAI to enhance data (up to {max_enhance} people)...")
+            validated_people = enhancer.enhance_batch(validated_people, title, max_enhance=max_enhance)
+        elif elapsed_time >= 20:
+            print(f"\n⏱️ Skipping OpenAI enhancement (time limit)")
         
         # Categorize people
         categorized_people = categorizer.categorize_batch(validated_people)

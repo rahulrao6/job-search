@@ -3,7 +3,7 @@ services:
     name: job-referral-finder
     env: python
     buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
-    startCommand: "gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 web_app:app"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 30 web_app:app"
     envVars:
       - key: PORT
         generateValue: true

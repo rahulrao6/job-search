@@ -84,17 +84,18 @@ class ActuallyWorkingFreeSources:
         except Exception as e:
             print(f"    ✗ Error: {str(e)[:50]}")
         
-        # Priority 4: Company website
-        print("  → Company website...")
-        try:
-            people = self._search_company_website(company)
-            new = self._add_unique(people, seen_urls, all_people)
-            if new > 0:
-                print(f"    ✓ Found {new} people")
-            else:
-                print(f"    - No team page found")
-        except Exception as e:
-            print(f"    ✗ Error: {str(e)[:50]}")
+        # Priority 4: Company website - SKIPPED for speed
+        # Uncomment if you want to search company websites (adds ~5 seconds)
+        # print("  → Company website...")
+        # try:
+        #     people = self._search_company_website(company)
+        #     new = self._add_unique(people, seen_urls, all_people)
+        #     if new > 0:
+        #         print(f"    ✓ Found {new} people")
+        #     else:
+        #         print(f"    - No team page found")
+        # except Exception as e:
+        #     print(f"    ✗ Error: {str(e)[:50]}")
         
         print(f"\n✅ Total: {len(all_people)} connections")
         return all_people[:max_results]
@@ -138,7 +139,7 @@ class ActuallyWorkingFreeSources:
             'start': 1,
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=5)  # Reduced timeout
         
         if response.status_code == 200:
             data = response.json()
@@ -198,7 +199,7 @@ class ActuallyWorkingFreeSources:
             'mkt': 'en-US',
         }
         
-        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response = requests.get(url, headers=headers, params=params, timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -253,13 +254,13 @@ class ActuallyWorkingFreeSources:
         company_query = company.replace(' ', '+')
         params = {
             'q': f'{company_query} in:bio type:user',  # Removed quotes for flexibility
-            'per_page': 100,  # Max allowed
+            'per_page': 20,  # Limited for speed
             'sort': 'joined',  # Get newest members first
             'order': 'desc'
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             
             if response.status_code == 200:
                 data = response.json()
@@ -295,34 +296,37 @@ class ActuallyWorkingFreeSources:
         except Exception as e:
             print(f"    ⚠ Exception: {str(e)[:50]}")
         
-        # Also try organization members (quick check, no extra lookups)
-        try:
-            org_name = company.lower().replace(' ', '').replace(',', '').replace('.', '')
-            org_url = f"https://api.github.com/orgs/{org_name}/members"
-            
-            response = requests.get(org_url, headers=headers, params={'per_page': 100}, timeout=10)
-            
-            if response.status_code == 200:
-                members = response.json()
-                print(f"    Found {len(members)} org members")
-                
-                for member in members:
-                    login = member.get('login', '')
-                    name = login.replace('-', ' ').replace('_', ' ').title()
-                    profile_url = member.get('html_url', '')
-                    
-                    person = Person(
-                        name=name,
-                        company=company,
-                        source='github',
-                        confidence_score=0.7,  # Higher - confirmed org member
-                        github_url=profile_url,
-                        evidence_url=profile_url,
-                    )
-                    people.append(person)
-                    
-        except Exception:
-            pass  # Org might not exist, that's OK
+        # Skip organization members search for speed (adds ~5 seconds)
+        # The user search above already finds most employees
+        # Uncomment if you want org members too:
+        #
+        # try:
+        #     org_name = company.lower().replace(' ', '').replace(',', '').replace('.', '')
+        #     org_url = f"https://api.github.com/orgs/{org_name}/members"
+        #     
+        #     response = requests.get(org_url, headers=headers, params={'per_page': 10}, timeout=3)
+        #     
+        #     if response.status_code == 200:
+        #         members = response.json()
+        #         print(f"    Found {len(members)} org members")
+        #         
+        #         for member in members:
+        #             login = member.get('login', '')
+        #             name = login.replace('-', ' ').replace('_', ' ').title()
+        #             profile_url = member.get('html_url', '')
+        #             
+        #             person = Person(
+        #                 name=name,
+        #                 company=company,
+        #                 source='github',
+        #                 confidence_score=0.7,  # Higher - confirmed org member
+        #                 github_url=profile_url,
+        #                 evidence_url=profile_url,
+        #             )
+        #             people.append(person)
+        #             
+        # except Exception:
+        #     pass  # Org might not exist, that's OK
         
         return people
     
