@@ -1,0 +1,518 @@
+{
+  "Google": {
+    "company": "Google",
+    "title": "Software Engineer",
+    "size": "large",
+    "timestamp": "2025-11-01T16:47:39.486719",
+    "sources": {
+      "free_search": {
+        "count": 29,
+        "success": true,
+        "people": [
+          {
+            "name": "account just for exporting some project of google code",
+            "source": "github_bio"
+          },
+          {
+            "name": "GoogleINURL",
+            "source": "github_bio"
+          },
+          {
+            "name": "Google Admin",
+            "source": "github_bio"
+          },
+          {
+            "name": "Google Code Exporter",
+            "source": "github_bio"
+          },
+          {
+            "name": "Georgi Lyubenov",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 11,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 11,
+          "by_source": {
+            "github": 11
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Google",
+      "domain": "google.com",
+      "website": "https://google.com",
+      "team_pages": [
+        "https://google.com/about"
+      ],
+      "linkedin": null,
+      "size": "large"
+    }
+  },
+  "Microsoft": {
+    "company": "Microsoft",
+    "title": "Product Manager",
+    "size": "large",
+    "timestamp": "2025-11-01T16:49:15.720505",
+    "sources": {
+      "free_search": {
+        "count": 28,
+        "success": true,
+        "people": [
+          {
+            "name": "Microsoft",
+            "source": "github_bio"
+          },
+          {
+            "name": "Microsoft Learning",
+            "source": "github_bio"
+          },
+          {
+            "name": "Microsoft Docs",
+            "source": "github_bio"
+          },
+          {
+            "name": "Microsoft Azure",
+            "source": "github_bio"
+          },
+          {
+            "name": "Microsoft-Corporation",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 12,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 12,
+          "by_source": {
+            "github": 12
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Microsoft",
+      "domain": "microsoft.com",
+      "website": "https://microsoft.com",
+      "team_pages": [
+        "https://microsoft.com/about",
+        "https://microsoft.com/people"
+      ],
+      "linkedin": null,
+      "size": "large"
+    }
+  },
+  "Amazon": {
+    "company": "Amazon",
+    "title": "Data Scientist",
+    "size": "large",
+    "timestamp": "2025-11-01T16:51:26.958677",
+    "sources": {
+      "free_search": {
+        "count": 30,
+        "success": true,
+        "people": [
+          {
+            "name": "Sergey Tuchkin",
+            "source": "github_bio"
+          },
+          {
+            "name": "Amazon",
+            "source": "github_bio"
+          },
+          {
+            "name": "Amazon Science",
+            "source": "github_bio"
+          },
+          {
+            "name": "Amazon Web Services",
+            "source": "github_bio"
+          },
+          {
+            "name": "Amazon Archives",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Amazon",
+      "domain": "amazon.com",
+      "website": "https://amazon.com",
+      "team_pages": [
+        "https://amazon.com/about",
+        "https://amazon.com/people"
+      ],
+      "linkedin": null,
+      "size": "large"
+    }
+  },
+  "Stripe": {
+    "company": "Stripe",
+    "title": "Software Engineer",
+    "size": "medium",
+    "timestamp": "2025-11-01T16:52:24.933643",
+    "sources": {
+      "free_search": {
+        "count": 30,
+        "success": true,
+        "people": [
+          {
+            "name": "Peter Squicciarini",
+            "source": "github_bio"
+          },
+          {
+            "name": "Chris Lambert",
+            "source": "github_bio"
+          },
+          {
+            "name": "Qais Patankar",
+            "source": "github_bio"
+          },
+          {
+            "name": "Jake Zimmerman",
+            "source": "github_bio"
+          },
+          {
+            "name": "Timothy Gu",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 10,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 10,
+          "by_source": {
+            "github": 10
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Stripe",
+      "domain": "stripe.com",
+      "website": "https://stripe.com",
+      "team_pages": [
+        "https://stripe.com/team",
+        "https://stripe.com/about"
+      ],
+      "linkedin": null,
+      "size": "medium"
+    }
+  },
+  "Databricks": {
+    "company": "Databricks",
+    "title": "Machine Learning Engineer",
+    "size": "medium",
+    "timestamp": "2025-11-01T16:53:51.116587",
+    "sources": {
+      "free_search": {
+        "count": 30,
+        "success": true,
+        "people": [
+          {
+            "name": "Databricks Brasil",
+            "source": "github_bio"
+          },
+          {
+            "name": "Jacek Laskowski",
+            "source": "github_bio"
+          },
+          {
+            "name": "Ankur Dave",
+            "source": "github_bio"
+          },
+          {
+            "name": "Databricks Partner Technical Program",
+            "source": "github_bio"
+          },
+          {
+            "name": "Sebastien Biollo",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 10,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 10,
+          "by_source": {
+            "github": 10
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Databricks",
+      "domain": "databricks.com",
+      "website": "https://databricks.com",
+      "team_pages": [
+        "https://databricks.com/company/team",
+        "https://databricks.com/about"
+      ],
+      "linkedin": null,
+      "size": "medium"
+    }
+  },
+  "Discord": {
+    "company": "Discord",
+    "title": "Backend Engineer",
+    "size": "medium",
+    "timestamp": "2025-11-01T16:55:10.866390",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 15,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 15,
+          "by_source": {
+            "github": 15
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Discord",
+      "domain": "discord.com",
+      "website": "https://discord.com",
+      "team_pages": [],
+      "linkedin": null,
+      "size": "medium"
+    }
+  },
+  "Cursor": {
+    "company": "Cursor",
+    "title": "Software Engineer",
+    "size": "small",
+    "timestamp": "2025-11-01T16:57:14.030927",
+    "sources": {
+      "free_search": {
+        "count": 30,
+        "success": true,
+        "people": [
+          {
+            "name": "Brian Chew",
+            "source": "github_bio"
+          },
+          {
+            "name": "Red Cursor",
+            "source": "github_bio"
+          },
+          {
+            "name": "Cursor Agent",
+            "source": "github_bio"
+          },
+          {
+            "name": "Federico Cassano",
+            "source": "github_bio"
+          },
+          {
+            "name": "Junhao \"Jerry\" Zhang",
+            "source": "github_bio"
+          }
+        ]
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Cursor",
+      "domain": "cursor.com",
+      "website": "https://cursor.com",
+      "team_pages": [],
+      "linkedin": null,
+      "size": "small"
+    }
+  },
+  "Replicate": {
+    "company": "Replicate",
+    "title": "Engineer",
+    "size": "small",
+    "timestamp": "2025-11-01T16:59:06.436411",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 6,
+        "success": true,
+        "by_source": {
+          "total_unique_people": 6,
+          "by_source": {
+            "github": 6
+          },
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Replicate",
+      "domain": "replicate.com",
+      "website": "https://replicate.com",
+      "team_pages": [
+        "https://replicate.com/about"
+      ],
+      "linkedin": null,
+      "size": "small"
+    }
+  },
+  "Modal": {
+    "company": "Modal",
+    "title": "Software Engineer",
+    "size": "small",
+    "timestamp": "2025-11-01T17:00:19.625357",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Modal",
+      "domain": "modal.com",
+      "website": "https://modal.com",
+      "team_pages": [],
+      "linkedin": null,
+      "size": "small"
+    }
+  },
+  "Clay": {
+    "company": "Clay",
+    "title": "Engineer",
+    "size": "small",
+    "timestamp": "2025-11-01T17:00:52.640157",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Clay",
+      "domain": "clay.com",
+      "website": "https://clay.com",
+      "team_pages": [
+        "https://clay.com/about"
+      ],
+      "linkedin": null,
+      "size": "small"
+    }
+  },
+  "Acme Startup": {
+    "company": "Acme Startup",
+    "title": "Engineer",
+    "size": "tiny",
+    "timestamp": "2025-11-01T17:02:21.520436",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Acme Startup",
+      "domain": "acmestartup.com",
+      "website": "https://acmestartup.com",
+      "team_pages": [],
+      "linkedin": null,
+      "size": "small"
+    }
+  },
+  "Unknown Corp": {
+    "company": "Unknown Corp",
+    "title": "Developer",
+    "size": "tiny",
+    "timestamp": "2025-11-01T17:03:02.811560",
+    "sources": {
+      "free_search": {
+        "count": 0,
+        "success": false,
+        "people": []
+      },
+      "current_system": {
+        "count": 0,
+        "success": false,
+        "by_source": {
+          "total_unique_people": 0,
+          "by_source": {},
+          "multi_source_matches": 0
+        }
+      }
+    },
+    "company_info": {
+      "name": "Unknown Corp",
+      "domain": null,
+      "website": null,
+      "team_pages": [],
+      "linkedin": null,
+      "size": "small"
+    }
+  }
+}

@@ -193,30 +193,31 @@ class ConnectionFinder:
     
     def _initialize_sources(self) -> Dict:
         """
-        Initialize ALL data sources (free + paid).
+        Initialize data sources - only what actually works in production.
         
-        Strategy: Quality sorting ensures best sources appear first,
-        but we still run ALL sources to maximize free results.
+        Current state:
+        - SerpAPI/Apollo: Work well but cost money
+        - GitHub: Works but limited metadata
+        - Others: Currently broken, disabled until fixed
         
-        Free sources are KEY for scalability!
+        Future improvements tracked in FREE_SOURCES_STRATEGY.md
         """
         sources = {}
         
-        # Tier 1: Premium APIs (best quality, but cost money)
-        sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0
-        sources['apollo'] = ApolloClient()              # Quality: 0.9
+        # Tier 1: Premium APIs (best quality, cost money)
+        sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0 - Best results
+        sources['apollo'] = ApolloClient()              # Quality: 0.9 - Professional data
         
-        # Tier 2: Free sources (need improvement, but essential for scale)
-        from src.scrapers.real_working_scraper import RealWorkingScraper
-        sources['free_linkedin'] = RealWorkingScraper()  # Quality: 0.7 - FIX ME
-        sources['github'] = GitHubScraper()               # Quality: 0.4
-        sources['company_pages'] = CompanyPagesScraper()  # Quality: 0.6 - FIX ME
-        sources['twitter'] = TwitterSearchScraper()       # Quality: 0.3 - FIX ME
-        sources['wellfound'] = WellfoundScraper()        # Quality: 0.5 - FIX ME
-        sources['crunchbase'] = CrunchbaseScraper()      # Quality: 0.7 - FIX ME
+        # Tier 2: Free sources that actually work
+        sources['github'] = GitHubScraper()             # Quality: 0.4 - Limited but free
         
-        # Tier 3: LinkedIn public (disabled by default - ToS risk)
-        # sources['linkedin_public'] = LinkedInPublicScraper()  # Keep disabled
+        # Tier 3: Free sources that need fixing (disabled for now)
+        # TODO: Fix these in V2
+        # sources['free_linkedin'] = RealWorkingScraper()  # Currently returns 0
+        # sources['company_pages'] = CompanyPagesScraper() # Most domains don't have /team
+        # sources['twitter'] = TwitterSearchScraper()      # Nitter instances down
+        # sources['wellfound'] = WellfoundScraper()       # Not finding companies
+        # sources['crunchbase'] = CrunchbaseScraper()     # 403 Forbidden
         
         return sources
     
