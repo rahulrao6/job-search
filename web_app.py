@@ -23,36 +23,39 @@ app = Flask(__name__)
 
 # Configure CORS
 # Allow localhost for development, Vercel domains, and FRONTEND_URL env var
+frontend_url = os.getenv('FRONTEND_URL')
 
-def cors_origin_check(origin):
-    """Check if origin is allowed"""
-    if not origin:
-        return False
-    
-    # Allow localhost for development
-    if origin.startswith('http://localhost:') or origin.startswith('http://127.0.0.1:'):
-        return True
-    
-    # Allow all Vercel deployments (*.vercel.app)
-    if '.vercel.app' in origin:
-        return True
-    
-    # Check FRONTEND_URL environment variable
-    frontend_url = os.getenv('FRONTEND_URL')
-    if frontend_url:
-        if frontend_url == '*':
-            return True  # Allow all origins
-        if origin == frontend_url or origin.startswith(frontend_url):
-            return True
-    
-    # Allow your specific frontend
-    if origin == 'https://frontend-job-drab.vercel.app':
-        return True
-    
-    return False
+# Build list of allowed origins
+allowed_origins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://frontend-job-drab.vercel.app',  # Your specific Vercel frontend
+]
 
+# Add FRONTEND_URL if provided
+if frontend_url and frontend_url != '*':
+    if frontend_url not in allowed_origins:
+        allowed_origins.append(frontend_url)
+
+# Handle CORS manually for Vercel domains since Flask-CORS doesn't support wildcards
+# We'll add an after_request handler to allow any .vercel.app domain
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin', '')
+    
+    # Allow Vercel domains
+    if origin and '.vercel.app' in origin:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+        response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-Requested-With, Accept'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Type, Authorization'
+    
+    return response
+
+# Configure Flask-CORS for explicit origins
 CORS(app, 
-     origins=cors_origin_check,  # Function-based origin check
+     origins=allowed_origins if frontend_url != '*' else None,  # None = allow all if FRONTEND_URL=*
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
      allow_headers=['Authorization', 'Content-Type', 'X-Requested-With', 'Accept'],
      supports_credentials=True,
