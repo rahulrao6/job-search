@@ -6,8 +6,11 @@ import time
 from pathlib import Path
 from typing import List, Dict, Optional
 from src.models.person import Person, PersonCategory
+from src.models.job_context import CandidateProfile, JobContext
+from src.db.models import UserProfile, JobRecord
 from src.utils.cache import get_cache
 from src.utils.cost_tracker import get_cost_tracker
+from src.services.profile_matcher import ProfileMatcher
 
 # Import all sources
 from src.apis.apollo_client import ApolloClient
@@ -90,6 +93,8 @@ class ConnectionFinder:
         company_domain: Optional[str] = None,
         use_cache: bool = True,
         debug: bool = False,
+        user_profile: Optional[CandidateProfile] = None,
+        job_context: Optional[JobContext] = None,
     ) -> Dict:
         """
         Find connections for a job.
@@ -157,10 +162,16 @@ class ConnectionFinder:
             print(f"\n▶ Running {source_name}...")
             
             try:
-                # Call search_people on each source
+                # Call search_people on each source with context
                 kwargs = {}
                 if company_domain and source_name == "company_pages":
                     kwargs["company_domain"] = company_domain
+                
+                # Pass user profile and job context for tailored searches
+                if user_profile:
+                    kwargs["user_profile"] = user_profile
+                if job_context:
+                    kwargs["job_context"] = job_context
                 
                 people = source_instance.search_people(company, title, **kwargs)
                 
@@ -209,7 +220,14 @@ class ConnectionFinder:
                 print(f"\n▶ Running {source_name}...")
                 
                 try:
-                    people = source_instance.search_people(company, title)
+                    # Pass context for paid sources too
+                    kwargs = {}
+                    if user_profile:
+                        kwargs["user_profile"] = user_profile
+                    if job_context:
+                        kwargs["job_context"] = job_context
+                    
+                    people = source_instance.search_people(company, title, **kwargs)
                     
                     if people:
                         aggregator.add_batch(people)
@@ -278,6 +296,160 @@ class ConnectionFinder:
         
         # Print summary
         self._print_summary(results)
+        
+        return results
+    
+    def find_connections_with_context(
+        self,
+        company: str,
+        title: str,
+        user_profile: Optional[CandidateProfile] = None,
+        job_context: Optional[JobContext] = None,
+        company_domain: Optional[str] = None,
+        use_cache: bool = True,
+        debug: bool = False,
+        filters: Optional[Dict] = None,
+    ) -> Dict:
+        """
+        Find connections with profile and job context for enhanced matching.
+        
+        Args:
+            company: Company name
+            title: Target job title
+            user_profile: User profile with skills, schools, past companies
+            job_context: Job context with department, location, skills
+            company_domain: Company website domain (optional)
+            use_cache: Whether to use cached results
+            debug: Debug mode
+            filters: Optional filters (categories, min_confidence, max_results)
+            
+        Returns:
+            Dictionary with results including relevance scores and match reasons
+        """
+        print(f"\n🔍 Finding connections for {title} at {company} (with context)...")
+        print("=" * 60)
+        
+        start_time = time.time()
+        
+        # Note: ProfileMatcher accepts CandidateProfile directly, so no conversion needed
+        # We'll pass user_profile (CandidateProfile) directly to ProfileMatcher
+        
+        # Extract job data from job_context if provided
+        job_department = None
+        job_location = None
+        if job_context:
+            job_department = job_context.department
+            job_location = job_context.location
+            if not company_domain:
+                company_domain = job_context.company_domain
+            if not title and job_context.job_title:
+                title = job_context.job_title
+        
+        # Run search with context (now passes user_profile and job_context)
+        results = self.find_connections(
+            company=company,
+            title=title,
+            company_domain=company_domain,
+            use_cache=use_cache,
+            debug=debug,
+            user_profile=user_profile,
+            job_context=job_context
+        )
+        
+        # Get all people from results
+        all_people_dicts = []
+        for category, people_list in results.get('by_category', {}).items():
+            all_people_dicts.extend(people_list)
+        
+        # Convert back to Person objects for matching
+        # Note: We need to reconstruct Person objects from dicts
+        # For now, we'll work with dicts and add relevance scores
+        
+        # Apply profile matching if profile provided
+        relevance_scores = {}
+        match_reasons_dict = {}
+        
+        if user_profile or job_context:
+            # Create a temporary JobRecord for matching
+            job_record = None
+            if job_context:
+                job_record = JobRecord(
+                    company_name=company,
+                    job_title=title,
+                    department=job_department,
+                    location=job_location,
+                    required_skills=job_context.candidate_skills if job_context else None
+                )
+            
+            # Calculate relevance for each person
+            for person_dict in all_people_dicts:
+                # Create a minimal Person object for matching
+                from src.models.person import Person as PersonModel
+                person_obj = PersonModel(
+                    name=person_dict.get('name', ''),
+                    title=person_dict.get('title'),
+                    company=person_dict.get('company', company),
+                    linkedin_url=person_dict.get('linkedin_url'),
+                    source=person_dict.get('source', 'unknown'),
+                    confidence_score=person_dict.get('confidence', 0.5),
+                    department=person_dict.get('department'),
+                    location=person_dict.get('location'),
+                    skills=person_dict.get('skills', [])
+                )
+                
+                # Calculate relevance
+                relevance, match_reasons = ProfileMatcher.calculate_relevance(
+                    person_obj,
+                    profile=None,  # We'll use candidate_profile instead
+                    job=job_record,
+                    candidate_profile=user_profile  # Pass CandidateProfile directly
+                )
+                
+                relevance_scores[person_dict.get('name', '')] = relevance
+                match_reasons_dict[person_dict.get('name', '')] = match_reasons
+        
+        # Sort by relevance score if available
+        if relevance_scores:
+            # Sort each category by relevance
+            enhanced_by_category = {}
+            for category, people_list in results.get('by_category', {}).items():
+                # Add relevance scores and match reasons to each person
+                enhanced_people = []
+                for person_dict in people_list:
+                    person_name = person_dict.get('name', '')
+                    person_dict['relevance_score'] = relevance_scores.get(person_name, person_dict.get('confidence', 0.5))
+                    person_dict['match_reasons'] = match_reasons_dict.get(person_name, [])
+                    enhanced_people.append(person_dict)
+                
+                # Sort by relevance score (descending)
+                enhanced_people.sort(key=lambda p: p.get('relevance_score', 0), reverse=True)
+                enhanced_by_category[category] = enhanced_people
+            results['by_category'] = enhanced_by_category
+        
+        # Add insights
+        insights = {
+            'alumni_matches': sum(1 for reasons in match_reasons_dict.values() if 'alumni_match' in reasons),
+            'ex_company_matches': sum(1 for reasons in match_reasons_dict.values() if 'ex_company_match' in reasons),
+            'skills_matches': sum(1 for reasons in match_reasons_dict.values() if 'skills_match' in str(reasons)),
+            'best_matches': []  # Categories with highest average relevance
+        }
+        
+        # Calculate best match categories
+        category_avg_relevance = {}
+        for category, people_list in results.get('by_category', {}).items():
+            if people_list:
+                avg_relevance = sum(p.get('relevance_score', 0.5) for p in people_list) / len(people_list)
+                category_avg_relevance[category] = avg_relevance
+        
+        if category_avg_relevance:
+            insights['best_matches'] = sorted(
+                category_avg_relevance.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:2]
+        
+        results['insights'] = insights
+        results['relevance_scores'] = relevance_scores
         
         return results
     

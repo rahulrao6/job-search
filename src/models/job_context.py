@@ -24,7 +24,7 @@ class JobContext(BaseModel):
     location: Optional[str] = None
     
     # Candidate info
-    candidate_resume: str  # Resume text
+    candidate_resume: Optional[str] = None  # Resume text (optional - can use profile data instead)
     candidate_linkedin_url: Optional[str] = None
     
     # Extracted from resume

@@ -15,15 +15,21 @@ class OpenAIEnhancer:
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.enabled = bool(self.api_key)
+        self.enabled = False
         
-        if self.enabled:
-            try:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
-            except ImportError:
-                print("⚠️  OpenAI package not installed. Run: pip install openai")
-                self.enabled = False
+        if self.api_key:
+            # Validate key format
+            if not self.api_key.startswith('sk-'):
+                print("⚠️  OpenAI API key format invalid (should start with 'sk-'). AI enhancement disabled.")
+            else:
+                try:
+                    from openai import OpenAI
+                    self.client = OpenAI(api_key=self.api_key)
+                    self.enabled = True
+                except ImportError:
+                    print("⚠️  OpenAI package not installed. Install with: pip install openai")
+                except Exception as e:
+                    print(f"⚠️  OpenAI initialization failed: {str(e)}. AI enhancement disabled.")
     
     def enhance_person(self, person: Person, target_title: str) -> Person:
         """
@@ -39,39 +45,68 @@ class OpenAIEnhancer:
         if not self.enabled:
             return person
         
-        # Build prompt
-        prompt = f"""Given this person's info from {person.source}:
-Name: {person.name}
-Title/Bio: {person.title or 'Unknown'}
-Company: {person.company}
+        # Build prompt with context about relevance and categorization
+        prompt = f"""Analyze this professional profile for job referral connection matching.
 
-Target job: {target_title}
+Person Information (from {person.source}):
+- Name: {person.name}
+- Title/Bio: {person.title or 'Unknown'}
+- Company: {person.company}
+- Location: {person.location or 'Not specified'}
+- Skills: {', '.join(person.skills[:5]) if person.skills else 'Not specified'}
 
-Please analyze and respond in JSON format:
+Target Job: {target_title}
+
+Your task:
+1. **Clean the title**: If messy (e.g., GitHub bio, LinkedIn summary), extract the actual job title
+2. **Categorize**: Determine if this person is a:
+   - "recruiter": HR, Talent, Recruiting roles
+   - "manager": Manager, Director, VP, Head, Chief roles (would be your manager)
+   - "senior": Senior, Staff, Principal, Architect roles (one level above target)
+   - "peer": Same level as target job (similar title, similar experience)
+   - "unknown": Can't determine or doesn't fit categories
+
+3. **Assess relevance**: Score how relevant this person is for the target job (0.0-1.0)
+   - Consider: title match, company match, skills overlap, location
+   - Higher score = more likely to help with job referral
+
+4. **Extract additional metadata**: If available, extract:
+   - Department/team
+   - Years of experience (if mentioned)
+   - Additional skills not already listed
+
+Respond in JSON format:
 {{
-  "cleaned_title": "clean job title if messy",
+  "cleaned_title": "clean, standardized job title",
   "category": "manager|recruiter|senior|peer|unknown",
-  "confidence": 0.0-1.0,
-  "reasoning": "why this category"
-}}
-
-If the title is messy (like a GitHub bio), extract the actual job title."""
+  "confidence": 0.0-1.0 (how confident in categorization),
+  "relevance_score": 0.0-1.0 (how relevant for target job),
+  "department": "department/team name if mentioned",
+  "reasoning": "brief explanation of category and relevance"
+}}"""
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",  # Cheap model
+                model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that analyzes professional profiles."},
+                    {"role": "system", "content": "You are an expert at analyzing professional profiles for job referral matching. Your categorization and relevance scoring help candidates find the most valuable connections. Return valid JSON only."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0,
-                max_tokens=150
+                max_tokens=300
             )
             
             result = response.choices[0].message.content
             
             # Parse JSON response
             import json
+            # Try to extract JSON if wrapped in markdown code blocks
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+                result = result.strip()
+            
             data = json.loads(result)
             
             # Update person with AI insights
@@ -88,12 +123,30 @@ If the title is messy (like a GitHub bio), extract the actual job title."""
                 }
                 person.category = category_map.get(data["category"], PersonCategory.UNKNOWN)
             
+            # Update confidence (prioritize AI confidence if available, otherwise use relevance score)
             if data.get("confidence"):
                 person.confidence_score = float(data["confidence"])
+            elif data.get("relevance_score"):
+                # Use relevance score as fallback confidence
+                person.confidence_score = float(data["relevance_score"])
+            
+            # Extract additional metadata if available
+            if data.get("department") and not person.department:
+                person.department = data["department"]
             
         except Exception as e:
-            # Silent failure - just return original person
-            pass
+            error_msg = str(e)
+            # Only log if it's not a quota/auth error (those are logged elsewhere)
+            if "quota" not in error_msg.lower() and "api_key" not in error_msg.lower() and "authentication" not in error_msg.lower():
+                # Silent failure for individual person enhancement to avoid spam
+                pass
+            # If it's a quota/auth error, disable for future calls
+            elif "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower():
+                self.enabled = False
+                print("⚠️  OpenAI quota exceeded. Disabling AI enhancement for this session.")
+            elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                self.enabled = False
+                print("⚠️  OpenAI API key invalid. Disabling AI enhancement.")
         
         return person
     

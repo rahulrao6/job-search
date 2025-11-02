@@ -2,6 +2,7 @@
 
 import re
 import os
+import asyncio
 from typing import Optional, Dict
 from bs4 import BeautifulSoup
 
@@ -14,17 +15,111 @@ class JobParser:
     """
     
     def __init__(self, use_ai: bool = True):
-        self.use_ai = use_ai and bool(os.getenv("OPENAI_API_KEY"))
+        self.use_ai = False  # Default to False, enable if key is valid
+        openai_key = os.getenv("OPENAI_API_KEY")
         
-        if self.use_ai:
+        if use_ai and openai_key:
+            # Validate key format (starts with sk-)
+            if not openai_key.startswith('sk-'):
+                print("⚠️  OpenAI API key format invalid (should start with 'sk-'). Disabling AI parsing.")
+            else:
+                try:
+                    from openai import OpenAI
+                    # Test if key is valid by initializing client
+                    self.client = OpenAI(api_key=openai_key)
+                    self.use_ai = True
+                except ImportError:
+                    print("⚠️  OpenAI package not installed. Install with: pip install openai")
+                except Exception as e:
+                    print(f"⚠️  OpenAI initialization failed: {str(e)}. AI parsing disabled.")
+    
+    async def fetch_html_with_playwright(self, job_url: str) -> Optional[str]:
+        """
+        Fetch HTML from job URL using Playwright (for JavaScript-heavy sites).
+        
+        Args:
+            job_url: URL of job posting
+            
+        Returns:
+            HTML content or None if failed
+        """
+        try:
+            from playwright.async_api import async_playwright
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                page = await context.new_page()
+                
+                try:
+                    await page.goto(job_url, wait_until='networkidle', timeout=30000)
+                    # Wait a bit for dynamic content
+                    await page.wait_for_timeout(2000)
+                    html = await page.content()
+                    await browser.close()
+                    return html
+                except Exception as e:
+                    await browser.close()
+                    print(f"Playwright fetch error: {e}")
+                    return None
+        except ImportError:
+            print("Playwright not available")
+            return None
+        except Exception as e:
+            print(f"Playwright error: {e}")
+            return None
+    
+    def fetch_html_simple(self, job_url: str) -> Optional[str]:
+        """
+        Fetch HTML using simple HTTP request.
+        
+        Args:
+            job_url: URL of job posting
+            
+        Returns:
+            HTML content or None if failed
+        """
+        try:
+            import requests
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(job_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            return response.text
+        except Exception as e:
+            print(f"Simple fetch error: {e}")
+            return None
+    
+    def fetch_job_html(self, job_url: str, use_playwright: bool = True) -> Optional[str]:
+        """
+        Fetch HTML from job URL using best available method.
+        
+        Args:
+            job_url: URL of job posting
+            use_playwright: Whether to try Playwright first
+            
+        Returns:
+            HTML content or None if failed
+        """
+        # Try Playwright first for JavaScript-heavy sites
+        if use_playwright:
             try:
-                from openai import OpenAI
-                self.client = OpenAI()
-            except:
-                self.use_ai = False
+                html = asyncio.run(self.fetch_html_with_playwright(job_url))
+                if html:
+                    return html
+            except Exception as e:
+                print(f"Playwright fetch failed: {e}")
+        
+        # Fallback to simple HTTP
+        return self.fetch_html_simple(job_url)
     
     def parse(self, job_url: str, job_html: Optional[str] = None, 
-              job_text: Optional[str] = None) -> Dict:
+              job_text: Optional[str] = None, auto_fetch: bool = True) -> Dict:
         """
         Parse job posting to extract key information.
         
@@ -32,9 +127,10 @@ class JobParser:
             job_url: URL of job posting
             job_html: Raw HTML (optional)
             job_text: Extracted text (optional)
+            auto_fetch: If True and no HTML/text provided, fetch from URL
         
         Returns:
-            Dict with company, title, department, etc.
+            Dict with company, title, department, required_skills, job_description, etc.
         """
         result = {
             "company": None,
@@ -43,28 +139,78 @@ class JobParser:
             "department": None,
             "location": None,
             "seniority": None,
+            "required_skills": [],
+            "job_description": None,
         }
         
         # Extract from URL first
         result.update(self._parse_from_url(job_url))
         
+        # Auto-fetch HTML if not provided and auto_fetch is True
+        if not job_html and not job_text and auto_fetch:
+            job_html = self.fetch_job_html(job_url)
+        
         # If we have HTML, parse it
         if job_html:
             result.update(self._parse_from_html(job_html))
+            # Extract text from HTML for AI parsing
+            if not job_text:
+                soup = BeautifulSoup(job_html, 'html.parser')
+                # Remove script and style elements
+                for script in soup(["script", "style"]):
+                    script.decompose()
+                job_text = soup.get_text(separator="\n", strip=True)
+                result['job_description'] = job_text[:2000]  # Store truncated description
         
         # If we have text, parse it
         if job_text:
-            result.update(self._parse_from_text(job_text))
+            text_results = self._parse_from_text(job_text)
+            result.update(text_results)
+            
+            # Extract required skills from job text
+            result['required_skills'] = self._extract_required_skills(job_text)
+            
+            # Store full description if not already set
+            if not result.get('job_description'):
+                result['job_description'] = job_text[:2000]
         
-        # Use AI as fallback if enabled
+        # Use AI for better extraction if enabled
         if self.use_ai and (job_html or job_text):
             ai_result = self._parse_with_ai(job_text or job_html)
             # Fill in missing fields
             for key, value in ai_result.items():
                 if not result.get(key) and value:
                     result[key] = value
+            
+            # Extract skills using AI (prioritize AI extraction)
+            if 'required_skills' in ai_result and ai_result.get('required_skills'):
+                result['required_skills'] = ai_result.get('required_skills', [])
+            elif 'nice_to_have_skills' in ai_result:
+                # Store nice-to-have separately if available
+                result['nice_to_have_skills'] = ai_result.get('nice_to_have_skills', [])
         
         return result
+    
+    def _extract_required_skills(self, text: str) -> list:
+        """Extract required skills from job description"""
+        skills = []
+        
+        # Common skill keywords
+        tech_skills = [
+            'Python', 'Java', 'JavaScript', 'TypeScript', 'Go', 'Rust', 'C++', 'C#',
+            'React', 'Angular', 'Vue', 'Node.js', 'Django', 'Flask', 'Spring',
+            'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Terraform',
+            'SQL', 'PostgreSQL', 'MongoDB', 'Redis', 'Cassandra',
+            'Machine Learning', 'Deep Learning', 'AI', 'NLP', 'TensorFlow', 'PyTorch',
+            'Git', 'CI/CD', 'Jenkins', 'Agile', 'Scrum',
+        ]
+        
+        text_lower = text.lower()
+        for skill in tech_skills:
+            if skill.lower() in text_lower:
+                skills.append(skill)
+        
+        return list(set(skills))[:20]  # Limit to 20
     
     def _parse_from_url(self, url: str) -> Dict:
         """Extract info from job posting URL"""
@@ -179,33 +325,75 @@ class JobParser:
             # Truncate content to save tokens
             content = content[:4000]
             
-            prompt = f"""Extract structured information from this job posting:
+            prompt = f"""Extract comprehensive structured information from this job posting. This data will be used to find relevant professional connections for job referrals, so accuracy is critical.
 
 {content}
 
-Return JSON with these fields (or null if not found):
+Extract ALL relevant information:
+
+1. **Company**: Official company name
+2. **Job Title**: Exact job title (e.g., "Senior Software Engineer", "Product Manager")
+3. **Department/Team**: The specific department, team, or division (e.g., "Engineering", "Product", "Data Science")
+4. **Location**: City, state, or remote/in-person status
+5. **Seniority Level**: "junior", "mid", or "senior" based on requirements and title
+6. **Required Skills**: Technical skills, programming languages, frameworks, or tools that are explicitly required
+7. **Nice-to-Have Skills**: Skills mentioned as preferred but not required (separate from required)
+
+For skills extraction:
+- Look for sections like "Requirements", "Qualifications", "Must Have", "Required"
+- Distinguish between "Required" and "Preferred/Nice to Have"
+- Include specific technologies mentioned (e.g., Python, React, AWS)
+- Be comprehensive but accurate
+
+Return JSON with these fields (use null if not found):
 {{
   "company": "Company name",
   "job_title": "Job title",
-  "department": "Department/team",
-  "location": "Location",
-  "seniority": "junior|mid|senior"
+  "department": "Department/team name",
+  "location": "Location (city, state, or remote)",
+  "seniority": "junior|mid|senior",
+  "required_skills": ["list of skills that are explicitly required"],
+  "nice_to_have_skills": ["list of skills that are preferred but not required"]
 }}"""
             
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You extract structured data from job postings."},
+                    {"role": "system", "content": "You are an expert at extracting structured data from job postings for connection finding and job matching. Your accuracy helps candidates find the right professional connections. Return valid JSON only."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0,
-                max_tokens=200
+                max_tokens=500
             )
             
             import json
-            return json.loads(response.choices[0].message.content)
+            response_content = response.choices[0].message.content.strip()
+            # Try to extract JSON if wrapped in markdown code blocks
+            if response_content.startswith("```"):
+                response_content = response_content.split("```")[1]
+                if response_content.startswith("json"):
+                    response_content = response_content[4:]
+                response_content = response_content.strip()
+            
+            return json.loads(response_content)
         
         except Exception as e:
-            print(f"⚠️  AI parsing error: {e}")
+            error_msg = str(e)
+            # Provide helpful error messages
+            if "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower():
+                print("⚠️  OpenAI API quota exceeded. Please check your billing at https://platform.openai.com/account/billing")
+                print("   Job parsing will continue with pattern-based extraction only.")
+            elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                print("⚠️  OpenAI API key invalid or expired. Check your OPENAI_API_KEY environment variable.")
+                print("   Job parsing will continue with pattern-based extraction only.")
+            elif "rate_limit" in error_msg.lower():
+                print("⚠️  OpenAI API rate limit exceeded. Please wait a moment and try again.")
+                print("   Job parsing will continue with pattern-based extraction only.")
+            else:
+                print(f"⚠️  AI parsing error: {error_msg}")
+                print("   Job parsing will continue with pattern-based extraction only.")
+            
+            # Disable AI for future calls to avoid repeated errors
+            self.use_ai = False
             return {}
 

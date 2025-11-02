@@ -28,7 +28,9 @@ class PersonValidator:
     PAST_EMPLOYMENT_KEYWORDS = [
         'former', 'ex-', 'previously at', 'formerly at',
         'retired from', 'alumni', 'past', 'was at',
-        'worked at', 'used to work'
+        'worked at', 'used to work', 'alumnus of', 'formerly',
+        'was', 'previous', 'past role', 'previous role',
+        'alumni of', 'former employee', 'ex employee'
     ]
     
     # Generic/spam indicators
@@ -73,7 +75,11 @@ class PersonValidator:
         
         # Check 5: Company mismatch in title
         if self._company_mismatch_in_title(person):
-            return False, "Title indicates different company"
+            return False, "Title indicates different company or missing company context"
+        
+        # Check 6: Verify company appears in title/snippet (additional safety check)
+        if self._missing_company_context(person):
+            return False, "Company not mentioned in title/snippet (likely wrong person)"
         
         return True, ""
     
@@ -102,20 +108,35 @@ class PersonValidator:
         """
         Check if person's name matches company name.
         
+        Improved logic:
+        - Only filter exact word matches (not substrings)
+        - Check if matched word is actually a name component vs part of a longer word
+        - Example: "Amazonia Smith" searching "Amazon" should pass
+        - Example: "Amazon Johnson" searching "Amazon" should fail
+        
         Examples:
         - Searching "Amazon" → Person named "Amazon Smith" (FALSE POSITIVE)
         - Searching "Meta" → Person named "Meta Johnson" (FALSE POSITIVE)
+        - Searching "Amazon" → Person named "Amazonia Smith" (VALID - substring, not exact word)
         """
         name_lower = person.name.lower()
-        name_words = set(name_lower.split())
+        name_words = name_lower.split()
         
-        # Check if company name is in person's name
-        if self.company in name_lower:
-            # But allow if it's clearly part of a longer name
-            # e.g., "Amazona" is different from "Amazon"
-            words_in_common = name_words & self.company_words
-            if words_in_common:
+        # Check for exact word matches (not substrings)
+        # This catches "Amazon Smith" but not "Amazonia Smith"
+        for name_word in name_words:
+            # Exact word match (case-insensitive)
+            if name_word == self.company:
                 return True
+            
+            # Check if company is multi-word and matches as phrase
+            if ' ' in self.company:
+                company_words = self.company.split()
+                # Check if consecutive words in name match company phrase
+                for i in range(len(name_words) - len(company_words) + 1):
+                    name_phrase = ' '.join(name_words[i:i+len(company_words)])
+                    if name_phrase == self.company:
+                        return True
         
         return False
     
@@ -123,18 +144,38 @@ class PersonValidator:
         """
         Check if title/bio indicates past employment.
         
+        Enhanced detection:
+        - Expanded keyword list
+        - Pattern matching for phrases like "was at [company]" or "[company] alumnus"
+        
         Examples:
         - "Former Software Engineer at Google"
         - "Ex-Meta Engineer"
         - "Previously at Amazon"
+        - "Was at Stripe"
+        - "Google Alumnus"
         """
         if not person.title:
             return False
         
         title_lower = person.title.lower()
         
+        # Check for keywords
         for keyword in self.PAST_EMPLOYMENT_KEYWORDS:
             if keyword in title_lower:
+                return True
+        
+        # Pattern matching for common past employment phrases
+        past_patterns = [
+            r'was\s+at\s+[a-z]+',  # "was at Google"
+            r'[a-z]+\s+alumnus',   # "Google alumnus"
+            r'alumnus\s+of\s+[a-z]+',  # "alumnus of Google"
+            r'formerly\s+[a-z]+',  # "formerly Google"
+            r'previous\s+[a-z]+\s+employee',  # "previous Google employee"
+        ]
+        
+        for pattern in past_patterns:
+            if re.search(pattern, title_lower):
                 return True
         
         return False
@@ -189,26 +230,111 @@ class PersonValidator:
     def _company_mismatch_in_title(self, person: Person) -> bool:
         """
         Check if title explicitly mentions a DIFFERENT company.
+        Also verify company is actually mentioned in title (reduces false positives).
         
         Examples:
         - Searching "Google" → Title "Engineer at Microsoft" (MISMATCH)
         - Searching "Meta" → Title "Former Meta, now at Amazon" (MISMATCH)
+        - Searching "Stripe" → Title "Software Engineer" with no company mention (FILTER - likely wrong person)
         """
         if not person.title:
+            # If no title, require company mention elsewhere (already checked in _missing_critical_info)
             return False
         
         title_lower = person.title.lower()
+        company_lower = self.company.lower()
+        company_words = company_lower.split()
+        
+        # Check if company is mentioned in title
+        company_mentioned = (
+            company_lower in title_lower or
+            any(word in title_lower for word in company_words if len(word) > 3)
+        )
+        
+        # If title is generic (like "Software Engineer" without company context), filter out
+        # This catches cases where Google returned wrong person
+        generic_title_patterns = [
+            r'^(software|senior|principal|staff|lead)\s+(engineer|developer|programmer|swe)',
+            r'^(product|engineering|technical)\s+(manager|director)',
+            r'^(data|machine\s+learning|ml|ai)\s+(engineer|scientist)',
+        ]
+        
+        is_generic = any(re.match(pattern, title_lower) for pattern in generic_title_patterns)
+        
+        # If title is generic AND company not mentioned, likely wrong person
+        if is_generic and not company_mentioned:
+            return True  # Filter out - generic title without company context
         
         # Pattern: "at [company]" or "@ [company]"
-        at_pattern = r'(?:at|@)\s+([a-z]+)'
+        at_pattern = r'(?:at|@)\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+)*)'
         matches = re.findall(at_pattern, title_lower)
         
         for matched_company in matches:
+            matched_lower = matched_company.lower()
             # If they mention a different company (not the target)
-            if matched_company != self.company and len(matched_company) > 3:
-                # But allow if they mention BOTH (e.g., "Former Google, now at Amazon")
-                if self.company not in title_lower:
-                    return True
+            if matched_lower != company_lower:
+                # Check if matched company is clearly different (not a variation)
+                # e.g., "Google" vs "Alphabet" should be caught, but "google llc" should not
+                company_variations = {company_lower, company_words[0] if company_words else company_lower}
+                if matched_lower not in company_variations and len(matched_company) > 3:
+                    # But allow if they mention BOTH (e.g., "Former Google, now at Amazon")
+                    if not any(word in title_lower for word in company_words if len(word) > 3):
+                        return True
+        
+        return False
+    
+    def _missing_company_context(self, person: Person) -> bool:
+        """
+        Check if person's title/snippet lacks company context.
+        
+        Filters out generic titles like "Software Engineer" where company isn't mentioned.
+        This catches cases where Google search returned wrong person.
+        
+        Examples:
+        - "Software Engineer" without company → FILTER (generic, no context)
+        - "Software Engineer at Stripe" → PASS (company mentioned)
+        - "Stripe Software Engineer" → PASS (company mentioned)
+        """
+        if not person.title:
+            return False  # Already checked in _missing_critical_info
+        
+        title_lower = person.title.lower()
+        company_lower = self.company.lower()
+        company_words = company_lower.split()
+        
+        # Check if company is mentioned
+        company_mentioned = (
+            company_lower in title_lower or
+            any(word in title_lower for word in company_words if len(word) > 3)
+        )
+        
+        # If company is mentioned, we're good
+        if company_mentioned:
+            return False
+        
+        # If no company mentioned, check if title suggests employment context
+        # Titles like "Engineer at X" or "X Engineer" suggest company context
+        employment_patterns = [
+            r'\bat\s+',  # "Engineer at Company"
+            r'\b@\s+',   # "Engineer @ Company"
+            r'\b\|\s*',  # "Engineer | Company"
+        ]
+        
+        has_employment_context = any(re.search(pattern, title_lower) for pattern in employment_patterns)
+        
+        # If title has employment context pattern but no company, might be wrong person
+        # But be lenient - allow through if it's a detailed title
+        if has_employment_context and not company_mentioned:
+            # Could be "Engineer at [different company]" - already caught by _company_mismatch_in_title
+            return False  # Let other checks handle this
+        
+        # Filter very generic titles without company context (high false positive risk)
+        very_generic = ['engineer', 'developer', 'programmer', 'manager', 'director']
+        title_words = title_lower.split()
+        
+        # If title is just generic words without company, filter
+        if len(title_words) <= 2 and any(gen in title_words for gen in very_generic):
+            return True  # Too generic, likely wrong person
         
         return False
     

@@ -7,6 +7,7 @@ Use: APIs with free tiers + GitHub + company websites
 """
 
 import os
+import re
 import requests
 import time
 from typing import List, Optional
@@ -14,6 +15,8 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from src.models.person import Person
+from src.models.job_context import CandidateProfile, JobContext
+from src.utils.query_tracker import track_query
 
 # Load environment variables
 load_dotenv()
@@ -42,7 +45,9 @@ class ActuallyWorkingFreeSources:
         self.github_token = os.getenv('GITHUB_TOKEN')  # Optional but increases limits
         self.cost_per_search = 0.0  # Free sources!
         
-    def search_all(self, company: str, title: str = None, max_results: int = 50) -> List[Person]:
+    def search_all(self, company: str, title: str = None, max_results: int = 50, 
+                   user_profile: Optional[CandidateProfile] = None,
+                   job_context: Optional[JobContext] = None) -> List[Person]:
         """
         Search all working sources.
         """
@@ -55,7 +60,7 @@ class ActuallyWorkingFreeSources:
         if self.google_cse_id and self.google_api_key:
             print("  → Google Custom Search...")
             try:
-                people = self._search_google_cse(company, title)
+                people = self._search_google_cse(company, title, user_profile, job_context)
                 new = self._add_unique(people, seen_urls, all_people)
                 print(f"    ✓ Found {new} profiles")
             except Exception as e:
@@ -67,7 +72,7 @@ class ActuallyWorkingFreeSources:
         if self.bing_api_key:
             print("  → Bing Web Search API...")
             try:
-                people = self._search_bing_api(company, title)
+                people = self._search_bing_api(company, title, user_profile, job_context)
                 new = self._add_unique(people, seen_urls, all_people)
                 print(f"    ✓ Found {new} profiles")
             except Exception as e:
@@ -75,12 +80,18 @@ class ActuallyWorkingFreeSources:
         else:
             print("  ⊘ Bing API deprecated (use Google CSE instead)")
         
-        # Priority 3: GitHub - LOW QUALITY (usernames only, for future enrichment)
-        print("  → GitHub API (low quality - usernames only)...")
+        # Priority 3: GitHub - LOW QUALITY (only if LinkedIn cross-reference exists)
+        print("  → GitHub API (filtering: LinkedIn cross-reference required)...")
         try:
-            people = self._search_github(company)
-            new = self._add_unique(people, seen_urls, all_people)
-            print(f"    ✓ Found {new} profiles (will be deprioritized)")
+            github_people = self._search_github(company, title, job_context)
+            # Filter: Only include GitHub results if they have LinkedIn URL
+            # This prevents low-quality GitHub-only results from polluting results
+            filtered_github = [p for p in github_people if p.linkedin_url is not None]
+            new = self._add_unique(filtered_github, seen_urls, all_people)
+            if len(github_people) > len(filtered_github):
+                print(f"    ✓ Found {len(github_people)} GitHub profiles, {new} with LinkedIn cross-reference included")
+            else:
+                print(f"    ✓ Found {new} profiles with LinkedIn")
         except Exception as e:
             print(f"    ✗ Error: {str(e)[:50]}")
         
@@ -111,83 +122,227 @@ class ActuallyWorkingFreeSources:
                 count += 1
         return count
     
-    def _search_google_cse(self, company: str, title: str = None) -> List[Person]:
+    def _search_google_cse(self, company: str, title: str = None,
+                          user_profile: Optional[CandidateProfile] = None,
+                          job_context: Optional[JobContext] = None) -> List[Person]:
         """
-        Google Custom Search Engine API.
+        Google Custom Search Engine API with context-aware query building.
         
-        Setup:
-        1. Create CSE: https://programmablesearchengine.google.com/
-        2. Configure to search "linkedin.com/in/*"
-        3. Get API key from Google Cloud Console
-        4. 100 searches/day free
+        Uses resume and job data to build more targeted queries.
         """
         people = []
-        
-        # Build search query - more flexible for small companies
-        query = f'site:linkedin.com/in/ {company}'
-        if title:
-            query += f' {title}'
-        
         url = "https://www.googleapis.com/customsearch/v1"
         
-        # First request
-        params = {
-            'key': self.google_api_key,
-            'cx': self.google_cse_id,
-            'q': query,
-            'num': 10,  # Max per request
-            'start': 1,
-        }
+        # Build query variations with context
+        query_variations = self._build_google_query_variations(company, title, user_profile, job_context)
         
-        response = requests.get(url, params=params, timeout=5)  # Reduced timeout
-        
-        if response.status_code == 200:
-            data = response.json()
+        # Try each query variation until we get good results
+        for query in query_variations:
+            start_time = time.time()
+            query_success = False
+            results_count = 0
             
-            for item in data.get('items', []):
-                url = item.get('link', '')
-                title_text = item.get('title', '')
-                snippet = item.get('snippet', '')
+            try:
+                params = {
+                    'key': self.google_api_key,
+                    'cx': self.google_cse_id,
+                    'q': query,
+                    'num': 10,  # Max per request
+                    'start': 1,
+                }
                 
-                if 'linkedin.com/in/' in url:
-                    # Extract name from title (format: "Name - Job Title - LinkedIn")
-                    name = title_text.split(' - ')[0].strip()
+                response = requests.get(url, params=params, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get('items', [])
+                    results_count = len(items)
                     
-                    # Try to extract title from snippet or title
-                    job_title = None
-                    if ' - ' in title_text:
-                        parts = title_text.split(' - ')
-                        if len(parts) >= 2:
-                            job_title = parts[1].strip()
+                    for item in items:
+                        item_url = item.get('link', '')
+                        title_text = item.get('title', '')
+                        snippet = item.get('snippet', '')
+                        
+                        if 'linkedin.com/in/' in item_url:
+                            # CRITICAL: Verify company appears in result (reduces false positives)
+                            # Combine title and snippet for company verification
+                            combined_text = f"{title_text} {snippet}".lower()
+                            company_lower = company.lower()
+                            
+                            # Check if company name appears in the result
+                            # This is crucial - many results mention company but person doesn't work there
+                            company_in_text = (
+                                company_lower in combined_text or
+                                any(word in combined_text for word in company_lower.split() if len(word) > 3)
+                            )
+                            
+                            # Skip if company not mentioned (likely not a current employee)
+                            if not company_in_text:
+                                continue
+                            
+                            # Extract name from title (format: "Name - Job Title - LinkedIn")
+                            name = title_text.split(' - ')[0].strip()
+                            
+                            # Try to extract title from snippet or title
+                            job_title = None
+                            if ' - ' in title_text:
+                                parts = title_text.split(' - ')
+                                if len(parts) >= 2:
+                                    job_title = parts[1].strip()
+                            
+                            # If no title from title field, try to extract from snippet
+                            if not job_title and snippet:
+                                # Look for job title patterns in snippet
+                                # Common pattern: "Title at Company" or "Title | Company"
+                                title_patterns = [
+                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:at|@|•|\|)\s+' + re.escape(company),
+                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Engineer',
+                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Manager',
+                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Director',
+                                ]
+                                for pattern in title_patterns:
+                                    match = re.search(pattern, snippet, re.IGNORECASE)
+                                    if match:
+                                        potential_title = match.group(1).strip()
+                                        if len(potential_title) > 3 and len(potential_title) < 50:
+                                            job_title = potential_title
+                                            break
+                            
+                            # Extract actual company from snippet if mentioned
+                            extracted_company = company  # Default to search company
+                            # Verify company name from snippet (handles variations like "Google LLC")
+                            if snippet:
+                                # Look for company mention in snippet
+                                company_pattern = r'\b(' + '|'.join([
+                                    re.escape(company_lower),
+                                    re.escape(company_lower.split()[0]) if ' ' in company_lower else company_lower
+                                ]) + r')\b'
+                                if re.search(company_pattern, snippet.lower()):
+                                    # Company is mentioned - good sign
+                                    pass
+                                else:
+                                    # Company not clearly mentioned - lower confidence
+                                    # But still include if it was in the combined text check above
+                                    pass
+                            
+                            if len(name) > 2:
+                                # Additional validation: Title should be meaningful
+                                # Filter out if title is too generic without company context
+                                if job_title:
+                                    title_lower = job_title.lower()
+                                    # Skip generic titles that don't suggest employment at company
+                                    generic_titles = ['student', 'freelancer', 'consultant', 'seeking']
+                                    if any(gen in title_lower for gen in generic_titles):
+                                        continue
+                                
+                                person = Person(
+                                    name=name,
+                                    title=job_title,
+                                    company=extracted_company,
+                                    linkedin_url=item_url,
+                                    source='google_cse',
+                                    confidence_score=0.9  # High quality from Google
+                                )
+                                people.append(person)
                     
-                    if len(name) > 2:
-                        person = Person(
-                            name=name,
-                            title=job_title,
-                            company=company,
-                            linkedin_url=url,
-                            source='google_cse',
-                            confidence_score=0.9  # High quality from Google
-                        )
-                        people.append(person)
+                    query_success = True
+                        
+            except Exception as e:
+                # Continue to next query variation
+                query_success = False
+                pass
+            finally:
+                # Track query performance
+                execution_time_ms = (time.time() - start_time) * 1000
+                track_query(
+                    query=query,
+                    results_count=results_count,
+                    execution_time_ms=execution_time_ms,
+                    source='google_cse',
+                    success=query_success
+                )
         
         return people
     
-    def _search_bing_api(self, company: str, title: str = None) -> List[Person]:
+    def _build_google_query_variations(self, company: str, title: str = None,
+                                     user_profile: Optional[CandidateProfile] = None,
+                                     job_context: Optional[JobContext] = None) -> List[str]:
         """
-        Bing Web Search API.
+        Build multiple query variations using context for better coverage.
         
-        Setup:
-        1. Create Azure account
-        2. Create Bing Search resource
-        3. Get API key
-        4. 1000 searches/month free
+        Strategy:
+        1. Primary: Company + Title (with skills if available)
+        2. School-based: Company + Title + School (alumni search)
+        3. Skills-based: Company + Title + Top skills from job
+        4. Department-based: Company + Department + Title
+        5. Fallback: Just Company + Title (broadest)
+        """
+        queries = []
+        base = f'site:linkedin.com/in/ {company}'
+        
+        # Primary query: Company + Title
+        if title:
+            primary = f'{base} {title}'
+            queries.append(primary)
+            
+            # Add skills from job context if available
+            if job_context and job_context.candidate_skills:
+                top_skills = job_context.candidate_skills[:2]  # Top 2 skills
+                if top_skills:
+                    skills_query = f'{base} {title} {" ".join(top_skills)}'
+                    queries.append(skills_query)
+        
+        # School-based query (alumni search) - higher relevance potential
+        if user_profile and user_profile.schools:
+            top_school = user_profile.schools[0]  # Most recent/relevant school
+            if title:
+                school_query = f'{base} {title} "{top_school}"'
+                queries.append(school_query)
+            else:
+                school_query = f'{base} "{top_school}"'
+                queries.append(school_query)
+        
+        # Department-based query if available
+        if job_context and job_context.department:
+            if title:
+                dept_query = f'{base} "{job_context.department}" {title}'
+                queries.append(dept_query)
+        
+        # Fallback: Just company + title (or company only)
+        if not queries:
+            queries.append(f'{base} {title}' if title else base)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_queries = []
+        for q in queries:
+            if q not in seen:
+                seen.add(q)
+                unique_queries.append(q)
+        
+        return unique_queries[:5]  # Limit to 5 variations
+    
+    def _search_bing_api(self, company: str, title: str = None,
+                        user_profile: Optional[CandidateProfile] = None,
+                        job_context: Optional[JobContext] = None) -> List[Person]:
+        """
+        Bing Web Search API with improved query construction.
+        
+        Removes strict quotes for better recall.
         """
         people = []
         
-        query = f'site:linkedin.com/in/ "{company}"'
+        # Build query without strict quotes for better recall
+        query_parts = ['site:linkedin.com/in/', company]
         if title:
-            query += f' "{title}"'
+            query_parts.append(title)
+        
+        # Add skills from job context if available
+        if job_context and job_context.candidate_skills:
+            top_skill = job_context.candidate_skills[0]
+            query_parts.append(top_skill)
+        
+        query = ' '.join(query_parts)
         
         url = "https://api.bing.microsoft.com/v7.0/search"
         headers = {
@@ -199,47 +354,47 @@ class ActuallyWorkingFreeSources:
             'mkt': 'en-US',
         }
         
-        response = requests.get(url, headers=headers, params=params, timeout=5)
-        
-        if response.status_code == 200:
-            data = response.json()
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             
-            for result in data.get('webPages', {}).get('value', []):
-                url = result.get('url', '')
-                title_text = result.get('name', '')
+            if response.status_code == 200:
+                data = response.json()
                 
-                if 'linkedin.com/in/' in url:
-                    name = title_text.split(' - ')[0].strip()
+                for result in data.get('webPages', {}).get('value', []):
+                    item_url = result.get('url', '')
+                    title_text = result.get('name', '')
                     
-                    job_title = None
-                    if ' - ' in title_text:
-                        parts = title_text.split(' - ')
-                        if len(parts) >= 2:
-                            job_title = parts[1].strip()
-                    
-                    if len(name) > 2:
-                        person = Person(
-                            name=name,
-                            title=job_title,
-                            company=company,
-                            linkedin_url=url,
-                            source='bing_api',
-                            confidence_score=0.85
-                        )
-                        people.append(person)
+                    if 'linkedin.com/in/' in item_url:
+                        name = title_text.split(' - ')[0].strip()
+                        
+                        job_title = None
+                        if ' - ' in title_text:
+                            parts = title_text.split(' - ')
+                            if len(parts) >= 2:
+                                job_title = parts[1].strip()
+                        
+                        if len(name) > 2:
+                            person = Person(
+                                name=name,
+                                title=job_title,
+                                company=company,
+                                linkedin_url=item_url,
+                                source='bing_api',
+                                confidence_score=0.85
+                            )
+                            people.append(person)
+        except Exception as e:
+            # Silently fail for Bing (it's deprecated)
+            pass
         
         return people
     
-    def _search_github(self, company: str) -> List[Person]:
+    def _search_github(self, company: str, title: str = None,
+                      job_context: Optional[JobContext] = None) -> List[Person]:
         """
-        GitHub API - SIMPLIFIED for reliability.
+        GitHub API - Enhanced with title filtering.
         
-        Only uses search API (no individual user lookups to save rate limits).
-        Returns basic info quickly.
-        
-        Limits:
-        - 60 requests/hour without auth (10 searches = 1000 users)
-        - 5000 requests/hour with GITHUB_TOKEN
+        Uses job title to filter results for better relevance.
         """
         people = []
         
@@ -247,54 +402,85 @@ class ActuallyWorkingFreeSources:
         if self.github_token:
             headers['Authorization'] = f'token {self.github_token}'
         
-        # Search users by company in bio (single API call)
+        # Search users by company in bio with title filtering
         url = "https://api.github.com/search/users"
         
-        # Build more flexible query for better results
+        # Build query with title if available
         company_query = company.replace(' ', '+')
-        params = {
-            'q': f'{company_query} in:bio type:user',  # Removed quotes for flexibility
-            'per_page': 20,  # Limited for speed
-            'sort': 'joined',  # Get newest members first
+        
+        # Try different query strategies
+        queries = []
+        
+        # Strategy 1: Company + Title in bio (most targeted)
+        if title:
+            # Extract main title word (e.g., "Software Engineer" -> "Engineer")
+            title_words = title.split()
+            if len(title_words) > 1:
+                main_title = title_words[-1]  # Usually the role type
+                queries.append(f'{company_query} {main_title.lower()} in:bio type:user')
+            queries.append(f'{company_query} "{title.lower()}" in:bio type:user')
+        
+        # Strategy 2: Company only (fallback)
+        queries.append(f'{company_query} in:bio type:user')
+        
+        # Strategy 3: Company + Skills from job (if available)
+        if job_context and job_context.candidate_skills:
+            top_skill = job_context.candidate_skills[0].lower()
+            queries.append(f'{company_query} {top_skill} in:bio type:user')
+        
+        # Try first query that returns results
+        params_base = {
+            'per_page': 20,
+            'sort': 'joined',
             'order': 'desc'
         }
         
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=5)
-            
-            if response.status_code == 200:
-                data = response.json()
-                total_count = data.get('total_count', 0)
-                items = data.get('items', [])
+        # Try queries in order until we get results
+        for query in queries:
+            try:
+                params = {**params_base, 'q': query}
+                response = requests.get(url, headers=headers, params=params, timeout=5)
                 
-                print(f"    Found {total_count} GitHub users (returning {len(items)})")
-                
-                # Use data directly from search (no extra API calls)
-                for user in items:
-                    login = user.get('login', '')
-                    avatar = user.get('avatar_url', '')
-                    profile_url = user.get('html_url', '')
+                if response.status_code == 200:
+                    data = response.json()
+                    total_count = data.get('total_count', 0)
+                    items = data.get('items', [])
                     
-                    # Use login as name (can enhance later with individual API calls if needed)
-                    name = login.replace('-', ' ').replace('_', ' ').title()
+                    if items:
+                        print(f"    Found {total_count} GitHub users (returning {len(items)})")
+                        
+                        # Use data directly from search (no extra API calls)
+                        for user in items:
+                            login = user.get('login', '')
+                            profile_url = user.get('html_url', '')
+                            
+                            # Use login as name (can enhance later with individual API calls if needed)
+                            name = login.replace('-', ' ').replace('_', ' ').title()
+                            
+                            person = Person(
+                                name=name,
+                                company=company,
+                                source='github',
+                                confidence_score=0.5,  # Lower since we don't verify bio
+                                github_url=profile_url,
+                                evidence_url=profile_url,
+                            )
+                            people.append(person)
+                        
+                        # If we got results, we can stop trying other queries
+                        if len(people) > 0:
+                            break
                     
-                    person = Person(
-                        name=name,
-                        company=company,
-                        source='github',
-                        confidence_score=0.5,  # Lower since we don't verify bio
-                        github_url=profile_url,
-                        evidence_url=profile_url,
-                    )
-                    people.append(person)
+                elif response.status_code == 403:
+                    print("    ⚠ Rate limited (add GITHUB_TOKEN to .env)")
+                    break  # Don't try other queries if rate limited
+                else:
+                    # Try next query
+                    continue
                     
-            elif response.status_code == 403:
-                print("    ⚠ Rate limited (add GITHUB_TOKEN to .env)")
-            else:
-                print(f"    ⚠ GitHub API error: {response.status_code}")
-                
-        except Exception as e:
-            print(f"    ⚠ Exception: {str(e)[:50]}")
+            except Exception as e:
+                # Try next query
+                continue
         
         # Skip organization members search for speed (adds ~5 seconds)
         # The user search above already finds most employees
@@ -422,13 +608,21 @@ class ActuallyWorkingFreeSources:
         Args:
             company: Company name
             title: Job title (optional)
-            **kwargs: Additional parameters (ignored)
+            **kwargs: Additional parameters including:
+                - user_profile: CandidateProfile with resume data
+                - job_context: JobContext with job data
+                - max_results: Maximum results to return
             
         Returns:
             List of Person objects
         """
-        # Use our main search method
-        return self.search_all(company, title, max_results=kwargs.get('max_results', 50))
+        user_profile = kwargs.get('user_profile')
+        job_context = kwargs.get('job_context')
+        max_results = kwargs.get('max_results', 50)
+        
+        # Use our main search method with context
+        return self.search_all(company, title, max_results=max_results,
+                              user_profile=user_profile, job_context=job_context)
     
     def is_configured(self) -> bool:
         """

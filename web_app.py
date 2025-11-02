@@ -4,6 +4,7 @@ Deploy to Render.com for easy browser-based testing and sharing
 """
 
 from flask import Flask, request, render_template_string
+from flask_cors import CORS
 import os
 import sys
 from dotenv import load_dotenv
@@ -15,8 +16,29 @@ load_dotenv()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.core.orchestrator import ConnectionFinder
+from src.api.routes import api
+from src.api.middleware import handle_api_errors
 
 app = Flask(__name__)
+
+# Configure CORS
+# Explicitly allow localhost:3000 for development, plus any FRONTEND_URL env var
+frontend_url = os.getenv('FRONTEND_URL')
+allowed_origins = ['http://localhost:3000', 'http://127.0.0.1:3000']
+if frontend_url and frontend_url != '*':
+    allowed_origins.append(frontend_url)
+
+CORS(app, 
+     origins=allowed_origins,
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+     allow_headers=['Authorization', 'Content-Type', 'X-Requested-With'],
+     supports_credentials=True)
+
+# Register error handlers
+handle_api_errors(app)
+
+# Register API routes
+app.register_blueprint(api)
 
 # HTML template with inline CSS for simplicity
 HOME_TEMPLATE = """

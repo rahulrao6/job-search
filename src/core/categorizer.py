@@ -1,8 +1,9 @@
 """Categorize people into target buckets"""
 
 import re
-from typing import List
+from typing import List, Optional
 from src.models.person import Person, PersonCategory
+from src.db.models import UserProfile, JobRecord
 
 
 class PersonCategorizer:
@@ -98,6 +99,48 @@ class PersonCategorizer:
         
         # Check if core titles match
         return title1 == title2 or title1 in title2 or title2 in title1
+    
+    def categorize_with_profile_context(
+        self,
+        person: Person,
+        profile: Optional[UserProfile] = None,
+        job: Optional[JobRecord] = None
+    ) -> Person:
+        """
+        Categorize a person with profile and job context.
+        Boosts confidence for alumni/ex-company matches.
+        
+        Args:
+            person: Person to categorize
+            profile: User profile (optional)
+            job: Job record (optional)
+            
+        Returns:
+            Person with category and potentially boosted confidence
+        """
+        # First, do standard categorization
+        person = self.categorize(person)
+        
+        # Boost confidence if there are profile matches
+        if profile:
+            # Check for alumni match (if we had school data in person)
+            # Note: This is a placeholder - in production, extract school from LinkedIn
+            if profile.schools:
+                # If person's metadata indicates same school, boost confidence
+                # For now, we'll boost if they work at a company user used to work at
+                pass
+            
+            # Check for ex-company match (person works at company user used to work at)
+            if profile.past_companies and person.company:
+                person_company_lower = person.company.lower()
+                for past_company in profile.past_companies:
+                    past_company_lower = past_company.lower()
+                    if past_company_lower in person_company_lower or person_company_lower in past_company_lower:
+                        # Boost confidence for ex-company connections
+                        person.confidence_score = min(1.0, (person.confidence_score or 0.5) + 0.15)
+                        break
+        
+        return person
     
     def get_category_counts(self, people: List[Person]) -> dict:
         """Get counts of people in each category"""
