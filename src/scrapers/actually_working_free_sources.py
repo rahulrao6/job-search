@@ -10,7 +10,9 @@ import os
 import re
 import requests
 import time
-from typing import List, Optional, Tuple
+import logging
+from typing import List, Optional
+
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
@@ -22,6 +24,8 @@ from src.utils.query_optimizer import QueryOptimizer
 
 # Load environment variables
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class ActuallyWorkingFreeSources:
@@ -62,33 +66,43 @@ class ActuallyWorkingFreeSources:
         seen_urls = set()
         
         print(f"\n🔍 Searching: {company} {title or ''}")
+        logger.info(f"Searching: {company} {title or ''}")
         
         # Priority 1: Google Custom Search (if configured)
         if self.google_cse_id and self.google_api_key:
             print("  → Google Custom Search...")
+            logger.debug("Google Custom Search...")
             try:
                 people = self._search_google_cse(company, title, user_profile, job_context)
                 new = self._add_unique(people, seen_urls, all_people)
                 print(f"    ✓ Found {new} profiles")
+                logger.info(f"Google CSE found {new} profiles")
             except Exception as e:
                 print(f"    ✗ Error: {str(e)[:50]}")
+                logger.warning(f"Google CSE error: {e}", exc_info=True)
         else:
             print("  ⊘ Google CSE not configured (set GOOGLE_CSE_ID + GOOGLE_API_KEY)")
+            logger.debug("Google CSE not configured")
         
         # Priority 2: Bing Search API (DEPRECATED - kept for backward compatibility)
         if self.bing_api_key:
             print("  → Bing Web Search API...")
+            logger.debug("Bing Web Search API...")
             try:
                 people = self._search_bing_api(company, title, user_profile, job_context)
                 new = self._add_unique(people, seen_urls, all_people)
                 print(f"    ✓ Found {new} profiles")
+                logger.info(f"Bing API found {new} profiles")
             except Exception as e:
                 print(f"    ✗ Error: {str(e)[:50]}")
+                logger.warning(f"Bing API error: {e}", exc_info=True)
         else:
             print("  ⊘ Bing API deprecated (use Google CSE instead)")
+            logger.debug("Bing API not configured")
         
         # Priority 3: GitHub - LOW QUALITY (only if LinkedIn cross-reference exists)
         print("  → GitHub API (filtering: LinkedIn cross-reference required)...")
+        logger.debug("GitHub API (filtering: LinkedIn cross-reference required)...")
         try:
             github_people = self._search_github(company, title, job_context)
             # Filter: Only include GitHub results if they have LinkedIn URL
@@ -97,10 +111,13 @@ class ActuallyWorkingFreeSources:
             new = self._add_unique(filtered_github, seen_urls, all_people)
             if len(github_people) > len(filtered_github):
                 print(f"    ✓ Found {len(github_people)} GitHub profiles, {new} with LinkedIn cross-reference included")
+                logger.info(f"GitHub found {len(github_people)} profiles, {new} with LinkedIn")
             else:
                 print(f"    ✓ Found {new} profiles with LinkedIn")
+                logger.info(f"GitHub found {new} profiles with LinkedIn")
         except Exception as e:
             print(f"    ✗ Error: {str(e)[:50]}")
+            logger.warning(f"GitHub API error: {e}", exc_info=True)
         
         # Priority 4: Company website - SKIPPED for speed
         # Uncomment if you want to search company websites (adds ~5 seconds)
@@ -116,6 +133,7 @@ class ActuallyWorkingFreeSources:
         #     print(f"    ✗ Error: {str(e)[:50]}")
         
         print(f"\n✅ Total: {len(all_people)} connections")
+        logger.info(f"Total connections found: {len(all_people)}")
         return all_people[:max_results]
     
     def _add_unique(self, people: List[Person], seen_urls: set, all_people: List[Person]) -> int:
@@ -522,6 +540,7 @@ class ActuallyWorkingFreeSources:
                     
                     if items:
                         print(f"    Found {total_count} GitHub users (returning {len(items)})")
+                        logger.info(f"GitHub search found {total_count} users (returning {len(items)})")
                         
                         # Use data directly from search (no extra API calls)
                         for user in items:
@@ -547,6 +566,7 @@ class ActuallyWorkingFreeSources:
                     
                 elif response.status_code == 403:
                     print("    ⚠ Rate limited (add GITHUB_TOKEN to .env)")
+                    logger.warning("GitHub API rate limited - add GITHUB_TOKEN to .env")
                     break  # Don't try other queries if rate limited
                 else:
                     # Try next query

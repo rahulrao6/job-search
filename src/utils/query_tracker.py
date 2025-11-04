@@ -6,9 +6,12 @@ Can be enhanced later to persist to database for analytics.
 """
 
 import time
+import logging
 from typing import Dict, List
 from collections import defaultdict
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class QueryTracker:
@@ -74,7 +77,9 @@ class QueryTracker:
         
         # Log query performance
         status = "✓" if success else "✗"
-        print(f"  QUERY_PERF: {status} query={query[:60]}..., results={results_count}, time={execution_time_ms:.0f}ms, source={source}")
+        log_msg = f"QUERY_PERF: {status} query={query[:60]}..., results={results_count}, time={execution_time_ms:.0f}ms, source={source}"
+        print(f"  {log_msg}")
+        logger.debug(log_msg)
     
     def get_stats(self) -> Dict:
         """

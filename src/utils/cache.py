@@ -11,7 +11,7 @@ from diskcache import Cache as DiskCache
 class Cache:
     """Simple file-based cache with TTL"""
     
-    def __init__(self, cache_dir: str = ".cache", ttl_hours: int = 24):
+    def __init__(self, cache_dir: str = ".cache", ttl_hours: int = 168):  # 7 days default for search results
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.ttl = timedelta(hours=ttl_hours)

@@ -2,10 +2,10 @@
 
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 from flask import Blueprint, request, jsonify
 
-logger = logging.getLogger(__name__)
 from uuid import UUID, uuid4
 from src.api.auth import require_auth, optional_auth
 from src.api.middleware import handle_exceptions
@@ -24,6 +24,9 @@ from src.db.models import UserProfile
 from src.extractors.resume_parser import ResumeParser
 from src.extractors.job_parser import JobParser
 from src.utils.storage import upload_resume_to_storage, get_resume_from_storage
+from src.utils.logger import log_request
+from src.utils.metrics import get_metrics_tracker
+from src.utils.cache import get_cache
 from werkzeug.utils import secure_filename
 import os
 from dotenv import load_dotenv
@@ -31,43 +34,101 @@ from dotenv import load_dotenv
 # Ensure environment variables are loaded
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 api = Blueprint('api', __name__, url_prefix='/api/v1')
 
 
 @api.route('/health', methods=['GET'])
 @handle_exceptions
 def health():
-    """Health check endpoint"""
+    """Health check endpoint with detailed status"""
     # Check database connection
     db_status = db_health_check()
     
-    # Check source configurations
+    # Check source configurations with more details
+    google_cse_id = os.getenv('GOOGLE_CSE_ID')
+    google_api_key = os.getenv('GOOGLE_API_KEY')
+    github_token = os.getenv('GITHUB_TOKEN')
+    openai_key = os.getenv('OPENAI_API_KEY')
+    
     sources_status = {
         'google_cse': {
-            'configured': bool(os.getenv('GOOGLE_CSE_ID') and os.getenv('GOOGLE_API_KEY')),
+            'configured': bool(google_cse_id and google_api_key),
+            'has_cse_id': bool(google_cse_id),
+            'has_api_key': bool(google_api_key),
             'remaining_quota': None  # Would need to query Google API
         },
         'github': {
-            'configured': bool(os.getenv('GITHUB_TOKEN')),
+            'configured': bool(github_token),
+            'has_token': bool(github_token),
             'rate_limit_remaining': None  # Would need to check GitHub API
         },
         'openai': {
-            'configured': bool(os.getenv('OPENAI_API_KEY'))
+            'configured': bool(openai_key),
+            'has_key': bool(openai_key),
+            'key_format_valid': bool(openai_key and openai_key.startswith('sk-')) if openai_key else False
         }
     }
     
-    response = HealthResponse(
-        status='healthy' if db_status['connected'] else 'degraded',
-        sources=sources_status,
-        database=db_status
-    )
+    # Get cache statistics
+    try:
+        cache = get_cache()
+        cache_stats = cache.get_stats()
+    except Exception as e:
+        logger.warning(f"Error getting cache stats: {e}", exc_info=True)
+        cache_stats = {'error': str(e)}
     
-    return jsonify(response.dict())
+    # Get basic metrics
+    try:
+        metrics_tracker = get_metrics_tracker()
+        metrics_summary = {
+            'total_requests': metrics_tracker.get_stats().get('total_requests', 0),
+            'total_errors': metrics_tracker.get_stats().get('total_errors', 0),
+            'recent_requests': metrics_tracker.get_stats().get('recent_requests', 0)
+        }
+    except Exception as e:
+        logger.warning(f"Error getting metrics: {e}", exc_info=True)
+        metrics_summary = {'error': str(e)}
+    
+    # Determine overall status
+    all_critical_configured = db_status['connected'] and bool(google_cse_id and google_api_key)
+    status = 'healthy' if all_critical_configured else 'degraded'
+    
+    response_data = {
+        'status': status,
+        'sources': sources_status,
+        'database': db_status,
+        'cache': cache_stats,
+        'metrics': metrics_summary
+    }
+    
+    return jsonify(response_data)
+
+
+@api.route('/metrics', methods=['GET'])
+@handle_exceptions
+def metrics():
+    """Get application metrics"""
+    metrics_tracker = get_metrics_tracker()
+    cache = get_cache()
+    
+    metrics_data = metrics_tracker.get_stats()
+    cache_stats = cache.get_stats()
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'api_metrics': metrics_data,
+            'cache': cache_stats,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    }), 200
 
 
 @api.route('/search', methods=['POST'])
 @require_auth
 @handle_exceptions
+@log_request
 def search():
     """
     Main search endpoint with profile context.
@@ -90,19 +151,18 @@ def search():
     # Get user context from auth middleware
     user_context = request.user_context
     
-    # Parse and validate request
-    body = request.get_json()
-    if not body:
-        return jsonify({
-            'success': False,
-            'error': {
-                'code': 'INVALID_REQUEST',
-                'message': 'Request body is required',
-                'details': {}
-            }
-        }), 400
-    
     try:
+        # Parse and validate request
+        body = request.get_json()
+        if not body:
+            return jsonify({
+                'success': False,
+                'error': {
+                    'code': 'INVALID_REQUEST',
+                    'message': 'Request body is required',
+                    'details': {}
+                }
+            }), 400
         # Extract search parameters
         company = body.get('company') or body.get('search', {}).get('company')
         job_title = body.get('job_title') or body.get('job_title') or body.get('search', {}).get('job_title')
@@ -129,7 +189,7 @@ def search():
                 if profile_result.data and profile_result.data[0].get('resume_parsed_data'):
                     saved_resume_data = profile_result.data[0]['resume_parsed_data']
             except Exception as e:
-                print(f"Error loading saved resume data: {e}")
+                logger.warning(f"Error loading saved resume data: {e}", exc_info=True)
         
         # Use provided profile data or fallback to saved resume data
         skills = (body.get('skills') or profile_data.get('skills') or 
@@ -173,7 +233,7 @@ def search():
                 if not job_description and job_data.get('job_description'):
                     job_description = job_data.get('job_description')
             except Exception as e:
-                print(f"Error auto-scraping job URL: {e}")
+                logger.warning(f"Error auto-scraping job URL: {e}", exc_info=True)
                 # Continue with provided data only
         
         # Extract filters
@@ -235,7 +295,7 @@ def search():
                 } if required_skills or job_description else None
             )
         except Exception as e:
-            print(f"Error creating job record: {e}")
+            logger.warning(f"Error creating job record: {e}", exc_info=True)
             # Continue without job record
         
         # Run search
@@ -285,7 +345,7 @@ def search():
                 )
                 people_objects.append(person_obj)
             except Exception as e:
-                print(f"Error converting person dict to Person object: {e}")
+                logger.warning(f"Error converting person dict to Person object: {e}", exc_info=True)
                 continue
         
         # Save discoveries
@@ -336,9 +396,7 @@ def search():
         return jsonify(response_data), 200
         
     except Exception as e:
-        print(f"Error in search endpoint: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in search endpoint: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': {
@@ -352,6 +410,7 @@ def search():
 @api.route('/quota', methods=['GET'])
 @require_auth
 @handle_exceptions
+@log_request
 def quota():
     """Get remaining quota for user"""
     user_context = request.user_context
@@ -367,6 +426,7 @@ def quota():
 @api.route('/connections/<connection_id>', methods=['GET'])
 @require_auth
 @handle_exceptions
+@log_request
 def get_connection(connection_id: str):
     """Get details for a specific connection"""
     user_context = request.user_context
@@ -424,6 +484,7 @@ def get_connection(connection_id: str):
 @api.route('/profile', methods=['GET'])
 @require_auth
 @handle_exceptions
+@log_request
 def get_profile():
     """Get saved user profile"""
     user_context = request.user_context
@@ -480,6 +541,7 @@ def get_profile():
 @api.route('/profile/save', methods=['POST'])
 @require_auth
 @handle_exceptions
+@log_request
 def save_profile():
     """Save user profile"""
     user_context = request.user_context
@@ -555,6 +617,7 @@ def save_profile():
 @api.route('/resume/upload', methods=['POST'])
 @require_auth
 @handle_exceptions
+@log_request
 def upload_resume():
     """
     Upload and parse resume PDF.
@@ -725,9 +788,7 @@ def upload_resume():
         }), 200
         
     except Exception as e:
-        print(f"Error in resume upload: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in resume upload: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': {
@@ -741,6 +802,7 @@ def upload_resume():
 @api.route('/job/parse', methods=['POST'])
 @require_auth
 @handle_exceptions
+@log_request
 def parse_job():
     """
     Parse job posting from URL.
@@ -798,9 +860,7 @@ def parse_job():
         }), 200
         
     except Exception as e:
-        print(f"Error parsing job: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error parsing job: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': {

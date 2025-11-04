@@ -15,8 +15,8 @@ from datetime import datetime
 
 # Import all sources
 from src.core.orchestrator import ConnectionFinder
-from src.scrapers.working_free_searcher import WorkingFreeSearcher
-from src.sources.smart_company_finder import SmartCompanyFinder
+# Note: WorkingFreeSearcher and SmartCompanyFinder were removed in cleanup
+# These tests now only use the ConnectionFinder which uses ActuallyWorkingFreeSources
 
 
 class FreeSourceTester:
@@ -25,8 +25,9 @@ class FreeSourceTester:
     def __init__(self):
         self.results = {}
         self.finder = ConnectionFinder()
-        self.free_searcher = WorkingFreeSearcher()
-        self.company_finder = SmartCompanyFinder()
+        # Legacy scrapers removed - using ConnectionFinder's ActuallyWorkingFreeSources
+        self.free_searcher = None  # Removed in cleanup
+        self.company_finder = None  # Removed in cleanup
     
     def test_all(self):
         """Run comprehensive tests on all sources."""
@@ -82,39 +83,12 @@ class FreeSourceTester:
             'sources': {}
         }
         
-        # Test 1: Company domain finder
-        print("  → Finding company info...")
-        company_info = self.company_finder.find_company_info(company)
-        result['company_info'] = company_info
-        if company_info['domain']:
-            print(f"    ✓ Domain: {company_info['domain']}")
-        else:
-            print(f"    ✗ No domain found")
+        # Test 1: Company domain (now handled by orchestrator)
+        print("  → Company domain detection handled by orchestrator...")
+        result['company_info'] = {'domain': None, 'note': 'Handled by ConnectionFinder'}
         
-        # Test 2: Free searcher (DuckDuckGo, Bing, etc.)
-        print("  → Testing free search...")
-        try:
-            free_results = self.free_searcher.search_all(company, title)
-            result['sources']['free_search'] = {
-                'count': len(free_results),
-                'success': len(free_results) > 0,
-                'people': [{'name': p.name, 'source': p.source} for p in free_results[:5]]
-            }
-            print(f"    ✓ Found {len(free_results)} people")
-            
-            # Show breakdown by source
-            by_source = {}
-            for person in free_results:
-                by_source[person.source] = by_source.get(person.source, 0) + 1
-            for source, count in by_source.items():
-                print(f"      - {source}: {count}")
-                
-        except Exception as e:
-            result['sources']['free_search'] = {'error': str(e), 'success': False}
-            print(f"    ✗ Error: {str(e)[:50]}")
-        
-        # Test 3: Current orchestrator
-        print("  → Testing current system...")
+        # Test 2: Current orchestrator (uses ActuallyWorkingFreeSources)
+        print("  → Testing current system (ActuallyWorkingFreeSources)...")
         try:
             current_results = self.finder.find_connections(company, title, use_cache=False)
             total = current_results.get('total_found', 0)
@@ -162,7 +136,7 @@ class FreeSourceTester:
             if size_results:
                 success_count = sum(1 for r in size_results 
                                   if any(s.get('success') for s in r['sources'].values()))
-                total_people = sum(r['sources'].get('free_search', {}).get('count', 0) 
+                total_people = sum(r['sources'].get('current_system', {}).get('count', 0) 
                                  for r in size_results)
                 avg_people = total_people / len(size_results) if size_results else 0
                 
@@ -174,14 +148,7 @@ class FreeSourceTester:
         source_stats = {}
         
         for result in self.results.values():
-            # Free search sources
-            free_search = result['sources'].get('free_search', {})
-            if free_search.get('people'):
-                for person in free_search['people']:
-                    source = person['source']
-                    source_stats[source] = source_stats.get(source, 0) + 1
-            
-            # Current system sources
+            # Current system sources (ActuallyWorkingFreeSources)
             current = result['sources'].get('current_system', {})
             for source, count in current.get('by_source', {}).items():
                 if isinstance(count, int):
@@ -211,18 +178,18 @@ class FreeSourceTester:
         # Recommendations
         print("\n💡 Recommendations:")
         
-        # Check if free search is working
-        free_search_total = sum(r['sources'].get('free_search', {}).get('count', 0) 
+        # Check if current system is working
+        current_total = sum(r['sources'].get('current_system', {}).get('count', 0) 
                                for r in self.results.values())
         
-        if free_search_total < 50:
-            print("  1. Free search engines are underperforming")
-            print("     → Implement Google Custom Search Engine (100 free/day)")
-            print("     → Add Bing Search API (1000 free/month)")
-            print("     → Fix DuckDuckGo parsing")
+        if current_total < 50:
+            print("  1. Current system (ActuallyWorkingFreeSources) is underperforming")
+            print("     → Check Google Custom Search Engine configuration")
+            print("     → Verify API keys are set correctly")
+            print("     → Review search query optimization")
         
         # Check small company performance
-        small_avg = sum(r['sources'].get('free_search', {}).get('count', 0) 
+        small_avg = sum(r['sources'].get('current_system', {}).get('count', 0) 
                        for r in self.results.values() if r['size'] in ['small', 'tiny'])
         small_count = len([r for r in self.results.values() if r['size'] in ['small', 'tiny']])
         

@@ -3,6 +3,7 @@
 import os
 import yaml
 import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 from src.models.person import Person, PersonCategory
@@ -12,15 +13,12 @@ from src.utils.cache import get_cache
 from src.utils.cost_tracker import get_cost_tracker
 from src.services.profile_matcher import ProfileMatcher
 
-# Import all sources
+logger = logging.getLogger(__name__)
+
+# Import sources that are actually used
 from src.apis.apollo_client import ApolloClient
-from src.sources.company_pages import CompanyPagesScraper
 from src.sources.github_profiles import GitHubScraper
-from src.sources.crunchbase_client import CrunchbaseScraper
 from src.sources.google_search import GoogleSearchScraper
-from src.sources.linkedin_public import LinkedInPublicScraper
-from src.sources.twitter_search import TwitterSearchScraper
-from src.sources.wellfound_scraper import WellfoundScraper
 
 from .aggregator import PeopleAggregator
 from .categorizer import PersonCategorizer
@@ -53,8 +51,7 @@ class ConnectionFinder:
         # Low Quality Sources (minimal professional info)
         'github': 0.2,                # GitHub API - just usernames, no titles
         'github_legacy': 0.2,         # GitHub org members - no professional info
-        'company_pages': 0.6,         # Direct company website scraping
-        'company_website': 0.6,       # Company team pages
+        'company_website': 0.6,       # Company team pages (if used in future)
         
         # Default for unknown sources
         'unknown': 0.5,
@@ -110,8 +107,8 @@ class ConnectionFinder:
         Returns:
             Dictionary with results and metadata
         """
-        print(f"\n🔍 Finding connections for {title} at {company}...")
-        print("=" * 60)
+        logger.info(f"Finding connections for {title} at {company}")
+        logger.debug("=" * 60)
         
         # Track start time for timeout management
         start_time = time.time()
@@ -122,14 +119,14 @@ class ConnectionFinder:
         if use_cache:
             cached = self.cache.get("connections", cache_key)
             if cached:
-                print("✓ Using cached results")
+                logger.info("Using cached results")
                 return cached
         
         # Auto-detect company domain if not provided
         if not company_domain:
             company_domain = self._guess_company_domain(company)
             if company_domain:
-                print(f"ℹ️  Auto-detected domain: {company_domain}")
+                logger.debug(f"Auto-detected domain: {company_domain}")
         
         # Initialize aggregator and categorizer
         aggregator = PeopleAggregator()
@@ -141,8 +138,8 @@ class ConnectionFinder:
         min_people_threshold = 10  # Focus on quality over quantity
         
         # Phase 1: Run FREE sources first
-        print("\n🆓 Phase 1: Free Sources (Cost: $0)")
-        print("-" * 40)
+        logger.info("Phase 1: Free Sources (Cost: $0)")
+        logger.debug("-" * 40)
         
         for source_name in free_sources:
             if source_name not in self.sources:
@@ -152,22 +149,21 @@ class ConnectionFinder:
             source_config = self.config['sources'].get(source_name, {})
             
             if not source_config.get('enabled', True):
-                print(f"⊘ {source_name}: disabled")
+                logger.debug(f"{source_name}: disabled")
                 continue
             
             # Check if source requires auth and is configured
             if hasattr(source_instance, 'is_configured'):
                 if not source_instance.is_configured():
-                    print(f"⊘ {source_name}: not configured (missing API key)")
+                    logger.debug(f"{source_name}: not configured (missing API key)")
                     continue
             
-            print(f"\n▶ Running {source_name}...")
+            logger.debug(f"Running {source_name}...")
             
             try:
                 # Call search_people on each source with context
                 kwargs = {}
-                if company_domain and source_name == "company_pages":
-                    kwargs["company_domain"] = company_domain
+                # Note: company_domain can be passed if source supports it
                 
                 # Pass user profile and job context for tailored searches
                 if user_profile:
@@ -181,7 +177,7 @@ class ConnectionFinder:
                     aggregator.add_batch(people)
                 
             except Exception as e:
-                print(f"⚠️  {source_name} error: {e}")
+                logger.warning(f"{source_name} error: {e}", exc_info=True)
         
         # Check if we have enough QUALITY people (LinkedIn profiles)
         all_people = aggregator.get_all()
@@ -190,17 +186,17 @@ class ConnectionFinder:
         current_count = len(quality_people)
         github_count = len(github_people)
         
-        print(f"\n📊 Free sources found:")
-        print(f"  - Quality results (LinkedIn profiles): {current_count} people")
-        print(f"  - GitHub results (for enrichment): {github_count} people")
+        logger.info(f"Free sources found: {current_count} quality results, {github_count} GitHub results")
+        logger.debug(f"  - Quality results (LinkedIn profiles): {current_count} people")
+        logger.debug(f"  - GitHub results (for enrichment): {github_count} people")
         
         # Check if we have time for paid sources
         elapsed_time = time.time() - start_time
         
         # Phase 2: Only use paid sources if we need more results AND have time
         if current_count < min_people_threshold and elapsed_time < 15:  # Only if < 15 seconds elapsed
-            print(f"\n💳 Phase 2: Premium Sources (Need {min_people_threshold - current_count} more)")
-            print("-" * 40)
+            logger.info(f"Phase 2: Premium Sources (Need {min_people_threshold - current_count} more)")
+            logger.debug("-" * 40)
             
             for source_name in paid_sources:
                 if source_name not in self.sources:
@@ -210,16 +206,16 @@ class ConnectionFinder:
                 source_config = self.config['sources'].get(source_name, {})
                 
                 if not source_config.get('enabled', True):
-                    print(f"⊘ {source_name}: disabled")
+                    logger.debug(f"{source_name}: disabled")
                     continue
                 
                 # Check if source requires auth and is configured
                 if hasattr(source_instance, 'is_configured'):
                     if not source_instance.is_configured():
-                        print(f"⊘ {source_name}: not configured (missing API key)")
+                        logger.debug(f"{source_name}: not configured (missing API key)")
                         continue
                 
-                print(f"\n▶ Running {source_name}...")
+                logger.debug(f"Running {source_name}...")
                 
                 try:
                     # Pass context for paid sources too
@@ -235,49 +231,25 @@ class ConnectionFinder:
                         aggregator.add_batch(people)
                         # Check if we have enough now
                         if len(aggregator.get_all()) >= min_people_threshold:
-                            print(f"✓ Reached threshold ({min_people_threshold}+ people), stopping paid searches")
+                            logger.info(f"Reached threshold ({min_people_threshold}+ people), stopping paid searches")
                             break
                     
                 except Exception as e:
-                    print(f"⚠️  {source_name} error: {e}")
+                    logger.warning(f"{source_name} error: {e}", exc_info=True)
         else:
-            print(f"✅ Sufficient results from free sources! Skipping paid APIs.")
+            logger.info("Sufficient results from free sources! Skipping paid APIs.")
         
         # Get all unique people
         all_people = aggregator.get_all()
         
-        # VALIDATE: Use comprehensive validation pipeline
-        print(f"\n▶ Running validation pipeline on {len(all_people)} people...")
-        
-        # Extract company domain
-        domain = company_domain
-        if not domain and job_context and job_context.company_domain:
-            domain = job_context.company_domain
-            
-        # Run validation pipeline
-        validation_pipeline = ValidationPipeline()
-        validation_results, metrics = validation_pipeline.process_results(
-            people=all_people,
-            company=company,
-            company_domain=domain,
-            job_context=job_context,
-            candidate_profile=user_profile,
-            source_quality_map=self.SOURCE_QUALITY_SCORES
-        )
-        
-        # Extract validated people
-        validated_people = [
-            result.person for result in validation_results 
-            if result.is_valid
-        ]
-        
-        # Print validation summary
-        print(f"✓ Validation complete:")
-        print(f"  - Kept {len(validated_people)} valid people")
-        print(f"  - Filtered {metrics['rejected_basic_validation']} in basic validation")
-        print(f"  - Filtered {metrics['rejected_quality']} for low quality")
-        print(f"  - Average confidence: {metrics['average_confidence']:.2f}")
-        print(f"  - Average quality: {metrics['average_quality']:.2f}")
+
+        # VALIDATE: Remove false positives before processing
+        logger.debug(f"Validating {len(all_people)} people (removing false positives)...")
+        validator = get_validator(company)
+        validated_people = validator.validate_batch(all_people)
+        filtered_count = len(all_people) - len(validated_people)
+        logger.info(f"Kept {len(validated_people)} valid people (filtered {filtered_count} false positives)")
+
         
         # Use OpenAI to enhance if available (but skip if running out of time)
         elapsed_time = time.time() - start_time
@@ -285,10 +257,10 @@ class ConnectionFinder:
         if enhancer.enabled and validated_people and elapsed_time < 20:
             # Limit enhancement based on time remaining
             max_enhance = 20 if elapsed_time < 15 else 10
-            print(f"\n▶ Using OpenAI to enhance data (up to {max_enhance} people)...")
+            logger.debug(f"Using OpenAI to enhance data (up to {max_enhance} people)...")
             validated_people = enhancer.enhance_batch(validated_people, title, max_enhance=max_enhance)
         elif elapsed_time >= 20:
-            print(f"\n⏱️ Skipping OpenAI enhancement (time limit)")
+            logger.debug("Skipping OpenAI enhancement (time limit)")
         
         # Categorize people
         categorized_people = categorizer.categorize_batch(validated_people)
@@ -367,8 +339,8 @@ class ConnectionFinder:
         Returns:
             Dictionary with results including relevance scores and match reasons
         """
-        print(f"\n🔍 Finding connections for {title} at {company} (with context)...")
-        print("=" * 60)
+        logger.info(f"Finding connections for {title} at {company} (with context)")
+        logger.debug("=" * 60)
         
         start_time = time.time()
         
@@ -516,11 +488,11 @@ class ConnectionFinder:
             elite_free = ActuallyWorkingFreeSources()
             if elite_free.is_configured():
                 sources['elite_free'] = elite_free  # Quality: 0.9 - Best free solution
-                print("🚀 Elite free sources loaded (Google CSE, GitHub API, Company Pages)")
+                logger.info("Elite free sources loaded (Google CSE, GitHub API, Company Pages)")
             else:
-                print("⚠️  Free sources not configured - add GOOGLE_API_KEY and GOOGLE_CSE_ID to .env")
+                logger.warning("Free sources not configured - add GOOGLE_API_KEY and GOOGLE_CSE_ID to .env")
         except ImportError as e:
-            print(f"⚠️  Free sources not available: {e}")
+            logger.warning(f"Free sources not available: {e}")
         
         # Tier 2: Premium APIs (enhancement/backup)
         sources['google_serp'] = GoogleSearchScraper()  # Quality: 1.0 - Best results (paid)
@@ -529,10 +501,10 @@ class ConnectionFinder:
         # Tier 3: Legacy GitHub (minimal fallback only)
         sources['github_legacy'] = GitHubScraper()      # Quality: 0.3 - Basic fallback
         
-        print(f"📊 Initialized {len(sources)} data sources")
-        print("   Primary: Google CSE (LinkedIn profiles)")
-        print("   Secondary: GitHub (usernames for enrichment)")
-        print("   Backup: Paid APIs (SerpAPI, Apollo)")
+        logger.info(f"Initialized {len(sources)} data sources")
+        logger.debug("   Primary: Google CSE (LinkedIn profiles)")
+        logger.debug("   Secondary: GitHub (usernames for enrichment)")
+        logger.debug("   Backup: Paid APIs (SerpAPI, Apollo)")
         
         return sources
     
@@ -648,32 +620,30 @@ class ConnectionFinder:
     
     def _print_summary(self, results: dict):
         """Print results summary"""
-        print("\n" + "=" * 60)
-        print(f"📊 RESULTS SUMMARY")
-        print("=" * 60)
-        print(f"Total unique people found: {results['total_found']}")
-        print(f"\nBy category:")
+        logger.info("=" * 60)
+        logger.info("RESULTS SUMMARY")
+        logger.info("=" * 60)
+        logger.info(f"Total unique people found: {results['total_found']}")
         
+        category_summary = []
         for category, count in results['category_counts'].items():
             if count > 0:
-                emoji = {
-                    'manager': '👔',
-                    'recruiter': '🎯',
-                    'senior': '⭐',
-                    'peer': '👥',
-                    'unknown': '❓',
-                }.get(category, '•')
-                print(f"  {emoji} {category.capitalize()}: {count}")
+                category_summary.append(f"{category}: {count}")
         
-        print(f"\nSources used:")
+        if category_summary:
+            logger.info(f"By category: {', '.join(category_summary)}")
+        
+        sources_used = []
         for source, count in results['source_stats']['by_source'].items():
-            print(f"  • {source}: {count} people")
+            sources_used.append(f"{source}: {count}")
+            logger.debug(f"  Source {source}: {count} people")
         
-        print(f"\nMulti-source matches (high confidence): {results['source_stats']['multi_source_matches']}")
+        logger.info(f"Sources used: {', '.join(sources_used)}")
+        logger.debug(f"Multi-source matches: {results['source_stats']['multi_source_matches']}")
         
         total_cost = results['cost_stats']['total_cost']
         if total_cost > 0:
-            print(f"\n💰 Total API cost: ${total_cost:.4f}")
+            logger.info(f"Total API cost: ${total_cost:.4f}")
         
-        print("\n" + "=" * 60)
+        logger.debug("=" * 60)
 

@@ -4,6 +4,7 @@ import re
 import time
 import random
 import hashlib
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any, Tuple
 from urllib.parse import quote_plus, urlparse, parse_qs
@@ -15,6 +16,8 @@ from urllib3.util.retry import Retry
 from src.utils.cache import get_cache
 from src.utils.rate_limiter import get_rate_limiter
 from src.utils.proxy_manager import get_proxy_manager
+
+logger = logging.getLogger(__name__)
 
 
 class BaseSearchScraper(ABC):
@@ -139,6 +142,7 @@ class BaseSearchScraper(ABC):
         if time.time() < self._backoff_until:
             wait_time = self._backoff_until - time.time()
             print(f"⏳ {self.name}: In backoff period, waiting {wait_time:.1f}s")
+            logger.debug(f"{self.name}: In backoff period, waiting {wait_time:.1f}s")
             time.sleep(wait_time)
         
         # Rate limiting
@@ -170,11 +174,13 @@ class BaseSearchScraper(ABC):
             
         except requests.exceptions.RequestException as e:
             print(f"⚠️ {self.name} request error: {e}")
+            logger.warning(f"{self.name} request error: {e}", exc_info=True)
             return None
     
     def _handle_block(self, response: requests.Response):
         """Handle detected blocks with exponential backoff"""
         print(f"🚫 {self.name}: Detected block (status {response.status_code})")
+        logger.warning(f"{self.name}: Detected block (status {response.status_code})")
         
         # Exponential backoff
         backoff_base = 30  # Start with 30 seconds
@@ -183,6 +189,7 @@ class BaseSearchScraper(ABC):
         
         self._backoff_until = time.time() + backoff_time
         print(f"⏰ {self.name}: Backing off for {backoff_time:.0f} seconds")
+        logger.warning(f"{self.name}: Backing off for {backoff_time:.0f} seconds")
         
         # Reset session
         self._session = None
@@ -191,6 +198,7 @@ class BaseSearchScraper(ABC):
         if self.proxy_manager.is_configured():
             self.proxy_manager.get_proxy(rotate=True)
             print(f"🔄 {self.name}: Rotated to next proxy")
+            logger.debug(f"{self.name}: Rotated to next proxy")
     
     def _get_cache_key(self, query: str, **kwargs) -> str:
         """Generate cache key from query and parameters"""
@@ -220,6 +228,7 @@ class BaseSearchScraper(ABC):
         cached = self.cache.get(self.name, {'key': cache_key})
         if cached:
             print(f"💾 {self.name}: Using cached results for '{query}'")
+            logger.debug(f"{self.name}: Using cached results for '{query}'")
             return cached[:max_results]
         
         # Build search URL
@@ -237,8 +246,10 @@ class BaseSearchScraper(ABC):
         if results:
             self.cache.set(self.name, {'key': cache_key}, results)
             print(f"✅ {self.name}: Found {len(results)} results for '{query}'")
+            logger.info(f"{self.name}: Found {len(results)} results for '{query}'")
         else:
             print(f"⚠️ {self.name}: No results for '{query}'")
+            logger.debug(f"{self.name}: No results for '{query}'")
         
         return results[:max_results]
     

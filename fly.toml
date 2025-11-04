@@ -1,0 +1,57 @@
+# Fly.io configuration for job-search application
+# Deploy with: flyctl launch (or flyctl deploy)
+
+app = "job-search"
+primary_region = "iad"  # Washington D.C. - adjust to your preference
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[services]]
+  processes = ["app"]
+  protocol = "tcp"
+  internal_port = 8080
+  
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+    
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/api/v1/health"
+    protocol = "http"
+    tls_skip_verify = false
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[[vm]]
+  memory_mb = 512
+  cpu_kind = "shared"
+  cpus = 1
+

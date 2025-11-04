@@ -9,9 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.apis.apollo_client import ApolloClient
-from src.sources.company_pages import CompanyPagesScraper
 from src.sources.github_profiles import GitHubScraper
-from src.sources.crunchbase_client import CrunchbaseScraper
 from src.sources.google_search import GoogleSearchScraper
 
 
@@ -35,20 +33,6 @@ class TestApolloClient:
             assert person.company
 
 
-class TestCompanyPagesScraper:
-    """Test company website scraper"""
-    
-    def test_initialization(self):
-        scraper = CompanyPagesScraper()
-        assert scraper is not None
-    
-    def test_domain_guess(self):
-        scraper = CompanyPagesScraper()
-        # Test removed - _guess_domain method no longer exists
-        # Method was removed when smart_domain_detector was cleaned up
-        assert scraper is not None
-
-
 class TestGitHubScraper:
     """Test GitHub scraper"""
     
@@ -61,14 +45,6 @@ class TestGitHubScraper:
         orgs = scraper._guess_org_names("Meta Platforms")
         assert isinstance(orgs, list)
         assert len(orgs) > 0
-
-
-class TestCrunchbaseScraper:
-    """Test Crunchbase scraper"""
-    
-    def test_initialization(self):
-        scraper = CrunchbaseScraper()
-        assert scraper is not None
 
 
 class TestGoogleSearchScraper:
@@ -91,4 +67,3 @@ class TestGoogleSearchScraper:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

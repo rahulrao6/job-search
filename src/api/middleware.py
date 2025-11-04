@@ -1,9 +1,16 @@
 """Middleware for error handling, CORS, and request processing"""
 
+import os
+import logging
 from functools import wraps
 from flask import jsonify, request
 from typing import Callable
 import traceback
+
+logger = logging.getLogger(__name__)
+
+# Check if we're in production (sanitize error messages)
+IS_PRODUCTION = os.getenv('ENVIRONMENT', '').lower() == 'production' or os.getenv('FLASK_ENV', '').lower() == 'production'
 
 
 class APIError(Exception):
@@ -114,14 +121,21 @@ def handle_exceptions(f):
         except KeyError as e:
             raise InvalidRequest(f"Missing required field: {str(e)}")
         except Exception as e:
-            # Log the full traceback for debugging
-            print(f"Unhandled exception in {f.__name__}: {e}")
-            traceback.print_exc()
+            # Log the full traceback for debugging (always log details)
+            logger.error(f"Unhandled exception in {f.__name__}: {e}", exc_info=True)
+            
+            # In production, return generic message to avoid leaking internal details
+            # In development, include more details
+            if IS_PRODUCTION:
+                error_message = 'An unexpected error occurred. Please try again later.'
+            else:
+                error_message = f'An unexpected error occurred: {str(e)}'
+            
             raise APIError(
                 'INTERNAL_SERVER_ERROR',
-                'An unexpected error occurred',
+                error_message,
                 500,
-                {'exception_type': type(e).__name__}
+                {'exception_type': type(e).__name__} if not IS_PRODUCTION else {}
             )
     
     return decorated_function

@@ -8,7 +8,7 @@ This service helps users find the right people to connect with at target compani
 - ✅ 10-40 LinkedIn profiles per search (with names, titles, direct links)
 - ✅ Smart categorization (Manager, Recruiter, Peer, etc.)
 - ✅ Cost: Usually $0 (Google CSE free tier)
-- ✅ Response time: 10-25 seconds (optimized for 30s timeout)
+- ✅ Response time: 10-25 seconds (optimized with caching and concurrency)
 - ✅ 100% actionable results (no GitHub usernames)
 
 ## Architecture Overview
@@ -48,16 +48,16 @@ This service helps users find the right people to connect with at target compani
 **Best for:** Teams wanting a ready-to-use solution
 
 ```bash
-# Deploy to Render.com (FREE)
-1. Fork repo to your GitHub
-2. Connect to Render.com
-3. Add API keys as environment variables
-4. Deploy with one click
+# Deploy to Fly.io
+1. Install flyctl: https://fly.io/docs/getting-started/installing-flyctl/
+2. Run: flyctl launch
+3. Set environment variables as secrets
+4. Deploy: flyctl deploy
 ```
 
 **Access Methods:**
-- Web UI: `https://your-app.onrender.com`
-- REST API: `POST https://your-app.onrender.com/api/search`
+- Web UI: `https://your-app-name.fly.dev`
+- REST API: `POST https://your-app-name.fly.dev/api/v1/search`
 
 ### Option 2: Integrate Core Library
 
@@ -83,17 +83,20 @@ results = finder.find_connections(
 
 ```javascript
 // JavaScript Example
-const response = await fetch('https://your-app.onrender.com/api/search', {
+const response = await fetch('https://your-app-name.fly.dev/api/v1/search', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer YOUR_API_KEY'
+    },
     body: JSON.stringify({
         company: 'Stripe',
-        title: 'Software Engineer'
+        job_title: 'Software Engineer'
     })
 });
 
 const data = await response.json();
-console.log(`Found ${data.total_found} people`);
+console.log(`Found ${data.data.total_found} people`);
 ```
 
 ## API Reference
@@ -308,7 +311,7 @@ GitHub results are included but deprioritized. In future versions:
 - Convert usernames → full professional profiles
 - Cost-effective way to expand results
 
-**Note**: All searches are optimized to complete within Render's 30-second timeout limit.
+**Note**: All searches are optimized for 10-25 second response times with caching and concurrency controls.
 
 ### Rate Limits
 
@@ -326,22 +329,29 @@ GitHub results are included but deprioritized. In future versions:
 
 ## Deployment Guide
 
-### Quick Deploy to Render.com (Recommended)
+### Quick Deploy to Fly.io (Recommended)
 
-1. **Fork the repository** to your GitHub
+1. **Install flyctl**: Follow instructions at [fly.io/docs/getting-started/installing-flyctl](https://fly.io/docs/getting-started/installing-flyctl/)
 
-2. **Sign up** at [render.com](https://render.com) (FREE)
+2. **Launch app**:
+   ```bash
+   flyctl launch
+   ```
 
-3. **Create Web Service**:
-   - Connect GitHub repo
-   - Build Command: `pip install --upgrade pip && pip install -r requirements.txt`
-   - Start Command: `gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 web_app:app`
+3. **Set environment variables** (as secrets):
+   ```bash
+   flyctl secrets set GOOGLE_API_KEY=your_key
+   flyctl secrets set GOOGLE_CSE_ID=your_cse_id
+   flyctl secrets set OPENAI_API_KEY=your_key
+   flyctl secrets set SUPABASE_URL=your_url SUPABASE_KEY=your_key
+   ```
 
-4. **Add Environment Variables**:
-   - All API keys from Configuration section
-   - Render will provide PORT automatically
+4. **Deploy**:
+   ```bash
+   flyctl deploy
+   ```
 
-5. **Deploy** - Takes ~2 minutes
+5. **Access your app** at `https://your-app-name.fly.dev`
 
 ### Docker Deployment
 
@@ -409,8 +419,8 @@ spec:
 
 ### Common Issues
 
-1. **Timeout/502 after 30 seconds**
-   - This is Render's 30-second HTTP limit (free tier)
+1. **Timeout errors**
+   - Fly.io supports 120+ second timeouts
    - Our system is optimized to complete within 25 seconds
    - If persistent: Check API response times, reduce search scope
 
@@ -423,7 +433,7 @@ spec:
    - Expected for companies < 50 employees
    - Solution: Try broader job title
 
-4. **502 Bad Gateway on Render (immediate)**
+4. **502 Bad Gateway (immediate)**
    - Check: Is gunicorn installed?
    - Check: Build logs for errors
 
