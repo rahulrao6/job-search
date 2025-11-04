@@ -3,8 +3,11 @@
 import re
 import os
 import asyncio
+import logging
 from typing import Optional, Dict
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 
 class JobParser:
@@ -21,17 +24,54 @@ class JobParser:
         if use_ai and openai_key:
             # Validate key format (starts with sk-)
             if not openai_key.startswith('sk-'):
-                print("⚠️  OpenAI API key format invalid (should start with 'sk-'). Disabling AI parsing.")
+                logger.warning("OpenAI API key format invalid (should start with 'sk-'). Disabling AI parsing.")
             else:
                 try:
                     from openai import OpenAI
-                    # Test if key is valid by initializing client
-                    self.client = OpenAI(api_key=openai_key)
-                    self.use_ai = True
+                    
+                    # Verify OpenAI SDK version (should be >= 1.0.0)
+                    try:
+                        import openai
+                        version_parts = openai.__version__.split('.')
+                        major_version = int(version_parts[0])
+                        if major_version < 1:
+                            raise ValueError(f"OpenAI SDK version {openai.__version__} is too old. Need >= 1.0.0")
+                    except (AttributeError, ValueError, IndexError):
+                        pass  # Continue anyway
+                    
+                    # Initialize client with ONLY api_key parameter (no proxies, etc.)
+                    # OpenAI SDK >=1.0.0 doesn't support 'proxies' in constructor
+                    # If proxies are needed, configure via HTTP_PROXY/HTTPS_PROXY environment variables
+                    # Be explicit and only pass api_key - do not use **kwargs pattern that might pick up unwanted params
+                    try:
+                        # Import httpx to create a client without proxies
+                        import httpx
+                        # Create httpx client explicitly without proxies to avoid any auto-detection
+                        # trust_env=False prevents httpx from reading HTTP_PROXY/HTTPS_PROXY env vars
+                        http_client = httpx.Client(trust_env=False, timeout=60.0)
+                        self.client = OpenAI(api_key=openai_key, http_client=http_client)
+                        self.use_ai = True
+                        logger.info("OpenAI client initialized successfully for job parsing")
+                    except Exception as init_error:
+                        # If httpx approach fails, try without custom http_client
+                        try:
+                            self.client = OpenAI(api_key=openai_key)
+                            self.use_ai = True
+                            logger.info("OpenAI client initialized successfully for job parsing")
+                        except Exception as fallback_error:
+                            error_msg = str(fallback_error)
+                            if 'proxies' in error_msg.lower():
+                                logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+                            else:
+                                logger.error(f"OpenAI initialization failed: {error_msg}. AI parsing disabled.", exc_info=True)
                 except ImportError:
-                    print("⚠️  OpenAI package not installed. Install with: pip install openai")
+                    logger.warning("OpenAI package not installed. Install with: pip install openai")
                 except Exception as e:
-                    print(f"⚠️  OpenAI initialization failed: {str(e)}. AI parsing disabled.")
+                    error_msg = str(e)
+                    if 'proxies' in error_msg.lower():
+                        logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+                    else:
+                        logger.error(f"OpenAI initialization failed: {error_msg}. AI parsing disabled.", exc_info=True)
     
     async def fetch_html_with_playwright(self, job_url: str) -> Optional[str]:
         """

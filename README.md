@@ -23,15 +23,24 @@ This tool helps job seekers find the right people to connect with at target comp
 
 ### Option 1: Deploy Web App (Recommended)
 
-**Deploy to Render.com (FREE):**
-1. Fork/clone this repo to GitHub
-2. Go to [render.com](https://render.com) and sign up
-3. Create new Web Service → Connect your repo
-4. Use these settings:
-   - Build Command: `pip install --upgrade pip && pip install -r requirements.txt`
-   - Start Command: `gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 web_app:app`
-5. Add environment variables (see [SETUP_FREE_APIS.md](SETUP_FREE_APIS.md))
-6. Deploy! Share the URL with anyone
+**Deploy to Fly.io:**
+1. Install [flyctl](https://fly.io/docs/getting-started/installing-flyctl/)
+2. Run `flyctl launch` in the project directory (or `flyctl deploy` if app already exists)
+3. Set environment variables:
+   ```bash
+   flyctl secrets set GOOGLE_API_KEY=your_key GOOGLE_CSE_ID=your_cse_id
+   flyctl secrets set OPENAI_API_KEY=your_key
+   flyctl secrets set SUPABASE_URL=your_url SUPABASE_KEY=your_key
+   ```
+4. Deploy: `flyctl deploy`
+5. Your app will be live at `https://your-app-name.fly.dev`
+
+**Benefits of Fly.io:**
+- Auto-scaling based on traffic
+- Global edge network for low latency
+- Generous timeouts (120s+) for long-running searches
+- Cost-effective pricing starting at ~$5/month
+- Easy scaling as you grow
 
 **Local Testing:**
 ```bash
@@ -88,7 +97,7 @@ Note: GitHub results are included but heavily deprioritized
 - **Small companies**: 10-20 quality people (LinkedIn profiles)
 - **Medium companies**: 20-40 quality people  
 - **Large companies**: 40+ quality people
-- **Response time**: 10-25 seconds (optimized for Render's 30s limit)
+- **Response time**: 10-25 seconds (optimized with caching and concurrency)
 - **Cost**: $0 for most searches
 - **Quality**: 100% LinkedIn profiles with job titles
 
@@ -114,7 +123,8 @@ src/
 
 web_app.py          # Flask web application
 requirements.txt    # Python dependencies
-render.yaml         # Render.com configuration
+fly.toml            # Fly.io deployment configuration
+Dockerfile          # Docker image for deployment
 ```
 
 ## Configuration
@@ -151,14 +161,13 @@ APOLLO_API_KEY=your_key     # Backup only
 ## Documentation
 
 - [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) - **Complete guide for teams** (share this!)
-- [FINAL_PUSH_READY.md](FINAL_PUSH_READY.md) - **Final status** - Ready to push!
-- [FINAL_TEST_RESULTS.md](FINAL_TEST_RESULTS.md) - Production test results (5 companies, 100% success)
 - [SETUP_FREE_APIS.md](SETUP_FREE_APIS.md) - Set up free API keys
-- [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) - Deploy to production
-- [TIMEOUT_FIX_SUMMARY.md](TIMEOUT_FIX_SUMMARY.md) - Recent 502 timeout fixes
-- [RENDER_SETUP.md](RENDER_SETUP.md) - Deploy to Render.com
+- [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) - Deploy to Fly.io
 - [GOOGLE_CSE_QUICKSTART.md](GOOGLE_CSE_QUICKSTART.md) - Google Custom Search setup
-- [QUICK_START.md](QUICK_START.md) - Quick start guide
+- [AUTH_SETUP.md](AUTH_SETUP.md) - Authentication setup
+- [API_SETUP.md](API_SETUP.md) - API configuration
+- [TESTING_GUIDE.md](TESTING_GUIDE.md) - Testing guide
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Troubleshooting common issues
 
 ## License
 

@@ -1,9 +1,9 @@
 """
 Simple Flask web app for Job Referral Connection Finder
-Deploy to Render.com for easy browser-based testing and sharing
+Deploy to Fly.io for production use with auto-scaling
 """
 
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, jsonify
 from flask_cors import CORS
 import os
 import sys
@@ -18,54 +18,114 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.core.orchestrator import ConnectionFinder
 from src.api.routes import api
 from src.api.middleware import handle_api_errors
+from src.utils.logger import setup_logging
+
+# Setup logging first (before creating app)
+setup_logging(
+    log_level=os.getenv('LOG_LEVEL', 'INFO'),
+    use_json=os.getenv('LOG_FORMAT', 'json').lower() == 'json' or os.getenv('ENVIRONMENT', '').lower() == 'production'
+)
 
 app = Flask(__name__)
 
-# Configure CORS
-# Allow localhost for development, Vercel domains, and FRONTEND_URL env var
+# Configure request size limits (16MB max)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+
+# Request timeout configuration:
+# - Gunicorn worker timeout: 120s (configured in Dockerfile CMD)
+#   This handles long-running search operations that may take 10-25 seconds
+# - HTTP request timeout: 60s (Fly.io default, can be increased if needed)
+# - External API timeouts: 30s per source (configured in source clients)
+# - Per-request timeout: No explicit Flask timeout (relies on Gunicorn)
+
+# Configure CORS for frontend proxying
 frontend_url = os.getenv('FRONTEND_URL')
 
-# Build list of allowed origins
+# Build list of allowed origins (explicit list, no wildcards for security)
 allowed_origins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    'https://frontend-job-drab.vercel.app',  # Your specific Vercel frontend
 ]
 
-# Add FRONTEND_URL if provided
-if frontend_url and frontend_url != '*':
-    if frontend_url not in allowed_origins:
-        allowed_origins.append(frontend_url)
+# Add FRONTEND_URL if provided (can be comma-separated list)
+if frontend_url:
+    if frontend_url == '*':
+        # Allow all origins (development only)
+        allowed_origins = None
+    else:
+        # Split comma-separated list
+        for url in frontend_url.split(','):
+            url = url.strip()
+            if url and url not in allowed_origins:
+                allowed_origins.append(url)
 
-# Handle CORS manually for Vercel domains since Flask-CORS doesn't support wildcards
-# We'll add an after_request handler to allow any .vercel.app domain
-@app.after_request
-def after_request(response):
-    origin = request.headers.get('Origin', '')
-    
-    # Allow Vercel domains
-    if origin and '.vercel.app' in origin:
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-        response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-Requested-With, Accept'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Type, Authorization'
-    
-    return response
-
-# Configure Flask-CORS for explicit origins
+# Configure Flask-CORS
 CORS(app, 
-     origins=allowed_origins if frontend_url != '*' else None,  # None = allow all if FRONTEND_URL=*
+     origins=allowed_origins,  # Explicit list only
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
      allow_headers=['Authorization', 'Content-Type', 'X-Requested-With', 'Accept'],
      supports_credentials=True,
      expose_headers=['Content-Type', 'Authorization'])
+
+# Add error handler for request size exceeded
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle 413 Request Entity Too Large"""
+    return jsonify({
+        'success': False,
+        'error': {
+            'code': 'REQUEST_TOO_LARGE',
+            'message': 'Request payload too large. Maximum size is 16MB.',
+            'details': {}
+        }
+    }), 413
 
 # Register error handlers
 handle_api_errors(app)
 
 # Register API routes
 app.register_blueprint(api)
+
+# Add request timing middleware for all routes
+@app.before_request
+def before_request():
+    """Track request start time for all requests"""
+    from flask import g
+    import time as time_module
+    g.request_start_time = time_module.time()
+
+@app.after_request
+def after_request_timing(response):
+    """Track request metrics and log slow requests"""
+    from flask import g, request
+    import time as time_module
+    
+    try:
+        if hasattr(g, 'request_start_time'):
+            duration_ms = (time_module.time() - g.request_start_time) * 1000
+            
+            # Log slow requests (>5s) as warnings
+            if duration_ms > 5000:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Slow request: {request.path} took {duration_ms:.0f}ms")
+            
+            # Record metrics
+            try:
+                from src.utils.metrics import get_metrics_tracker
+                metrics = get_metrics_tracker()
+                status_code = response.status_code if hasattr(response, 'status_code') else 200
+                metrics.record_request(
+                    endpoint=request.path,
+                    status_code=status_code,
+                    duration_ms=duration_ms
+                )
+            except Exception:
+                pass  # Don't fail if metrics tracking fails
+    except Exception:
+        pass  # Don't fail middleware on errors
+    
+    return response
 
 # HTML template with inline CSS for simplicity
 HOME_TEMPLATE = """
@@ -669,7 +729,7 @@ def search():
                                      categories={})
     
     try:
-        # Find connections (Render has its own timeout protection)
+        # Find connections
         finder = ConnectionFinder()
         results = finder.find_connections(company=company, title=role)
         
@@ -717,8 +777,8 @@ def search():
                                      categories={})
 
 if __name__ == '__main__':
-    # Get port from environment (for Render) or use 8000 (5000 blocked by macOS AirPlay)
-    port = int(os.environ.get('PORT', 8000))
+    # Get port from environment or use 8080 (default for Fly.io)
+    port = int(os.environ.get('PORT', 8080))
     # Run with host 0.0.0.0 so it's accessible externally
     # Debug mode disabled for production (signal issues in worker threads)
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -3,8 +3,11 @@
 import re
 import os
 import json
+import logging
 from typing import List, Dict, Optional
 from src.models.job_context import CandidateProfile
+
+logger = logging.getLogger(__name__)
 
 
 class ResumeParser:
@@ -20,48 +23,85 @@ class ResumeParser:
         openai_key = os.getenv("OPENAI_API_KEY")
         
         if not use_ai:
-            print("ℹ️  AI parsing disabled by parameter")
+            logger.info("AI parsing disabled by parameter")
             return
         
         if not openai_key:
-            print("ℹ️  OPENAI_API_KEY not set. AI parsing disabled. Using pattern-based extraction only.")
+            logger.info("OPENAI_API_KEY not set. AI parsing disabled. Using pattern-based extraction only.")
             return
         
         # Validate key format (starts with sk-)
         if not openai_key.startswith('sk-'):
-            print(f"⚠️  OpenAI API key format invalid (should start with 'sk-'). Got: {openai_key[:10]}...")
-            print("   Disabling AI parsing. Using pattern-based extraction only.")
+            logger.warning(f"OpenAI API key format invalid (should start with 'sk-'). Got: {openai_key[:10]}...")
+            logger.info("Disabling AI parsing. Using pattern-based extraction only.")
             return
         
         try:
             from openai import OpenAI
-            # Initialize client with explicit API key
-            self.client = OpenAI(api_key=openai_key)
+            import sys
+            
+            # Verify OpenAI SDK version (should be >= 1.0.0)
+            try:
+                import openai
+                version_parts = openai.__version__.split('.')
+                major_version = int(version_parts[0])
+                if major_version < 1:
+                    raise ValueError(f"OpenAI SDK version {openai.__version__} is too old. Need >= 1.0.0")
+            except (AttributeError, ValueError, IndexError):
+                pass  # Continue anyway
+            
+            # Initialize client with ONLY api_key parameter (no proxies, etc.)
+            # OpenAI SDK >=1.0.0 doesn't support 'proxies' in constructor
+            # If proxies are needed, configure via HTTP_PROXY/HTTPS_PROXY environment variables
+            # Be explicit and only pass api_key - do not use **kwargs pattern that might pick up unwanted params
+            try:
+                # Import httpx to create a client without proxies
+                import httpx
+                # Create httpx client explicitly without proxies to avoid any auto-detection
+                # trust_env=False prevents httpx from reading HTTP_PROXY/HTTPS_PROXY env vars
+                http_client = httpx.Client(trust_env=False, timeout=60.0)
+                self.client = OpenAI(api_key=openai_key, http_client=http_client)
+            except Exception as init_error:
+                # If httpx approach fails, try without custom http_client
+                try:
+                    self.client = OpenAI(api_key=openai_key)
+                except Exception as fallback_error:
+                    error_msg = str(fallback_error)
+                    if 'proxies' in error_msg.lower():
+                        logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+                    else:
+                        logger.error(f"OpenAI initialization failed: {error_msg}. AI parsing disabled.", exc_info=True)
+                    logger.info("AI parsing disabled. Using pattern-based extraction only.")
+                    return
             
             # Test connection with a simple API call
             try:
                 # This will verify the key is valid
                 self.client.models.list()
                 self.use_ai = True
-                print("✅ OpenAI AI parsing enabled and verified")
+                logger.info("OpenAI AI parsing enabled and verified")
             except Exception as test_error:
                 error_str = str(test_error)
                 if "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
-                    print("⚠️  OpenAI API quota exceeded. Check billing: https://platform.openai.com/account/billing")
-                    print("   AI parsing disabled. Using pattern-based extraction only.")
+                    logger.warning("OpenAI API quota exceeded. Check billing: https://platform.openai.com/account/billing")
+                    logger.info("AI parsing disabled. Using pattern-based extraction only.")
                 elif "api_key" in error_str.lower() or "authentication" in error_str.lower():
-                    print("⚠️  OpenAI API key invalid or expired. Check your OPENAI_API_KEY environment variable.")
-                    print("   AI parsing disabled. Using pattern-based extraction only.")
+                    logger.warning("OpenAI API key invalid or expired. Check your OPENAI_API_KEY environment variable.")
+                    logger.info("AI parsing disabled. Using pattern-based extraction only.")
                 else:
-                    print(f"⚠️  OpenAI connection test failed: {error_str}")
-                    print("   AI parsing disabled. Using pattern-based extraction only.")
+                    logger.warning(f"OpenAI connection test failed: {error_str}")
+                    logger.info("AI parsing disabled. Using pattern-based extraction only.")
                 
         except ImportError:
-            print("⚠️  OpenAI package not installed. Install with: pip install openai")
-            print("   AI parsing disabled. Using pattern-based extraction only.")
+            logger.warning("OpenAI package not installed. Install with: pip install openai")
+            logger.info("AI parsing disabled. Using pattern-based extraction only.")
         except Exception as e:
-            print(f"⚠️  OpenAI initialization failed: {str(e)}")
-            print("   AI parsing disabled. Using pattern-based extraction only.")
+            error_msg = str(e)
+            if 'proxies' in error_msg.lower():
+                logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+            else:
+                logger.error(f"OpenAI initialization failed: {error_msg}. AI parsing disabled.", exc_info=True)
+            logger.info("AI parsing disabled. Using pattern-based extraction only.")
     
     def extract_text_from_pdf(self, pdf_bytes: bytes) -> str:
         """

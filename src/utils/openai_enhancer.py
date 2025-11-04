@@ -1,8 +1,11 @@
 """Use OpenAI to enhance and categorize people data"""
 
 import os
+import logging
 from typing import List, Optional
 from src.models.person import Person, PersonCategory
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIEnhancer:
@@ -20,16 +23,57 @@ class OpenAIEnhancer:
         if self.api_key:
             # Validate key format
             if not self.api_key.startswith('sk-'):
-                print("⚠️  OpenAI API key format invalid (should start with 'sk-'). AI enhancement disabled.")
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("OpenAI API key format invalid (should start with 'sk-'). AI enhancement disabled.")
             else:
                 try:
                     from openai import OpenAI
-                    self.client = OpenAI(api_key=self.api_key)
-                    self.enabled = True
+                    import sys
+                    
+                    # Verify OpenAI SDK version (should be >= 1.0.0)
+                    try:
+                        import openai
+                        version_parts = openai.__version__.split('.')
+                        major_version = int(version_parts[0])
+                        if major_version < 1:
+                            raise ValueError(f"OpenAI SDK version {openai.__version__} is too old. Need >= 1.0.0")
+                    except (AttributeError, ValueError, IndexError) as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Could not verify OpenAI SDK version: {e}")
+                    
+                    # Initialize client with ONLY api_key parameter (no proxies, etc.)
+                    # OpenAI SDK >=1.0.0 doesn't support 'proxies' in constructor
+                    # If proxies are needed, configure via HTTP_PROXY/HTTPS_PROXY environment variables
+                    # Be explicit and only pass api_key - do not use **kwargs pattern that might pick up unwanted params
+                    try:
+                        # Import httpx to create a client without proxies
+                        import httpx
+                        # Create httpx client explicitly without proxies to avoid any auto-detection
+                        # trust_env=False prevents httpx from reading HTTP_PROXY/HTTPS_PROXY env vars
+                        http_client = httpx.Client(trust_env=False, timeout=60.0)
+                        self.client = OpenAI(api_key=self.api_key, http_client=http_client)
+                        self.enabled = True
+                    except Exception as init_error:
+                        # If httpx approach fails, try without custom http_client
+                        try:
+                            self.client = OpenAI(api_key=self.api_key)
+                            self.enabled = True
+                        except Exception as fallback_error:
+                            error_msg = str(fallback_error)
+                            if 'proxies' in error_msg.lower():
+                                logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+                            else:
+                                logger.error(f"OpenAI initialization failed: {error_msg}. AI enhancement disabled.", exc_info=True)
                 except ImportError:
-                    print("⚠️  OpenAI package not installed. Install with: pip install openai")
+                    logger.warning("OpenAI package not installed. Install with: pip install openai")
                 except Exception as e:
-                    print(f"⚠️  OpenAI initialization failed: {str(e)}. AI enhancement disabled.")
+                    error_msg = str(e)
+                    if 'proxies' in error_msg.lower():
+                        logger.error(f"OpenAI initialization failed: Proxies parameter detected. This is not supported in OpenAI SDK >=1.0.0. Error: {error_msg}")
+                    else:
+                        logger.error(f"OpenAI initialization failed: {error_msg}. AI enhancement disabled.", exc_info=True)
     
     def enhance_person(self, person: Person, target_title: str) -> Person:
         """
@@ -143,10 +187,10 @@ Respond in JSON format:
             # If it's a quota/auth error, disable for future calls
             elif "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower():
                 self.enabled = False
-                print("⚠️  OpenAI quota exceeded. Disabling AI enhancement for this session.")
+                logger.warning("OpenAI quota exceeded. Disabling AI enhancement for this session.")
             elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
                 self.enabled = False
-                print("⚠️  OpenAI API key invalid. Disabling AI enhancement.")
+                logger.warning("OpenAI API key invalid. Disabling AI enhancement.")
         
         return person
     
@@ -175,7 +219,7 @@ Respond in JSON format:
             else:
                 enhanced.append(person)
         
-        print(f"✓ Enhanced {min(len(people), max_enhance)} people with OpenAI")
+        logger.info(f"Enhanced {min(len(people), max_enhance)} people with OpenAI")
         return enhanced
 
 
