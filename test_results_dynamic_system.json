@@ -1,0 +1,198 @@
+{
+  "passed": 31,
+  "failed": 1,
+  "tests": [
+    {
+      "name": "Job Parser - Builtin extraction",
+      "passed": true,
+      "details": "Extracted company: Root (root.io)",
+      "timestamp": "2025-11-03T18:12:24.631036"
+    },
+    {
+      "name": "Job Parser - Confidence scoring",
+      "passed": true,
+      "details": "Confidence: 1.0",
+      "timestamp": "2025-11-03T18:12:24.631214"
+    },
+    {
+      "name": "Company Normalization - Facebook",
+      "passed": true,
+      "details": "Got: Meta, Expected: Meta",
+      "timestamp": "2025-11-03T18:12:24.631464"
+    },
+    {
+      "name": "Company Normalization - Google",
+      "passed": true,
+      "details": "Got: Alphabet, Expected: Google",
+      "timestamp": "2025-11-03T18:12:24.631491"
+    },
+    {
+      "name": "Company Normalization - FB",
+      "passed": true,
+      "details": "Got: Meta, Expected: Meta",
+      "timestamp": "2025-11-03T18:12:24.631510"
+    },
+    {
+      "name": "Domain Discovery - Google",
+      "passed": true,
+      "details": "Found: abc.xyz",
+      "timestamp": "2025-11-03T18:12:24.631556"
+    },
+    {
+      "name": "Domain Discovery - Anyscale",
+      "passed": true,
+      "details": "Found: anyscale.com",
+      "timestamp": "2025-11-03T18:12:24.631592"
+    },
+    {
+      "name": "Ambiguity Detection - Root",
+      "passed": true,
+      "details": "Detected as ambiguous",
+      "timestamp": "2025-11-03T18:12:24.631627"
+    },
+    {
+      "name": "Ambiguity Detection - Nova",
+      "passed": true,
+      "details": "Detected as ambiguous",
+      "timestamp": "2025-11-03T18:12:24.631647"
+    },
+    {
+      "name": "Ambiguity Detection - Atlas",
+      "passed": true,
+      "details": "Detected as ambiguous",
+      "timestamp": "2025-11-03T18:12:24.631667"
+    },
+    {
+      "name": "Company Match Scoring",
+      "passed": true,
+      "details": "Score: 0.4",
+      "timestamp": "2025-11-03T18:12:24.631726"
+    },
+    {
+      "name": "Query Generation - LinkedIn",
+      "passed": true,
+      "details": "Generated 10 queries",
+      "timestamp": "2025-11-03T18:12:24.632227"
+    },
+    {
+      "name": "Query Quality - Context inclusion",
+      "passed": true,
+      "details": "Domain: True, Alumni: True, Skills: True",
+      "timestamp": "2025-11-03T18:12:24.632269"
+    },
+    {
+      "name": "Categorization - Technical Recruiter (target: AI Engineer)",
+      "passed": true,
+      "details": "Category: recruiter",
+      "timestamp": "2025-11-03T18:12:24.632476"
+    },
+    {
+      "name": "Categorization - Engineering Manager (target: AI Engineer)",
+      "passed": true,
+      "details": "Category: manager",
+      "timestamp": "2025-11-03T18:12:24.632501"
+    },
+    {
+      "name": "Categorization - Senior AI Engineer (target: AI Engineer)",
+      "passed": true,
+      "details": "Category: senior",
+      "timestamp": "2025-11-03T18:12:24.632525"
+    },
+    {
+      "name": "Categorization - ML Engineer (target: AI Engineer)",
+      "passed": true,
+      "details": "Category: peer",
+      "timestamp": "2025-11-03T18:12:24.632569"
+    },
+    {
+      "name": "Categorization - Software Engineering Intern (target: AI Engineer)",
+      "passed": true,
+      "details": "Category: peer",
+      "timestamp": "2025-11-03T18:12:24.632610"
+    },
+    {
+      "name": "Early Career Detection - AI Engineer",
+      "passed": true,
+      "details": "Detected as not early career",
+      "timestamp": "2025-11-03T18:12:24.632631"
+    },
+    {
+      "name": "Categorization - Technical Recruiter (target: Software Engineering Intern)",
+      "passed": true,
+      "details": "Category: recruiter",
+      "timestamp": "2025-11-03T18:12:24.632682"
+    },
+    {
+      "name": "Categorization - Engineering Manager (target: Software Engineering Intern)",
+      "passed": true,
+      "details": "Category: manager",
+      "timestamp": "2025-11-03T18:12:24.632698"
+    },
+    {
+      "name": "Categorization - Senior AI Engineer (target: Software Engineering Intern)",
+      "passed": true,
+      "details": "Category: senior",
+      "timestamp": "2025-11-03T18:12:24.632719"
+    },
+    {
+      "name": "Categorization - ML Engineer (target: Software Engineering Intern)",
+      "passed": true,
+      "details": "Category: peer",
+      "timestamp": "2025-11-03T18:12:24.632746"
+    },
+    {
+      "name": "Categorization - Software Engineering Intern (target: Software Engineering Intern)",
+      "passed": true,
+      "details": "Category: peer",
+      "timestamp": "2025-11-03T18:12:24.632779"
+    },
+    {
+      "name": "Early Career Detection - Software Engineering Intern",
+      "passed": true,
+      "details": "Detected as early career",
+      "timestamp": "2025-11-03T18:12:24.632793"
+    },
+    {
+      "name": "Profile Match Scoring",
+      "passed": true,
+      "details": "Score: 0.74, Reasons: ex_company_match, skills_match (1 skills, 0 required)",
+      "timestamp": "2025-11-03T18:12:24.632986"
+    },
+    {
+      "name": "Profile Match - Ex-company detection",
+      "passed": true,
+      "details": "Detected ex-company: True",
+      "timestamp": "2025-11-03T18:12:24.633000"
+    },
+    {
+      "name": "Validation Pipeline - Basic filtering",
+      "passed": true,
+      "details": "Filtered 3 of 4 people",
+      "timestamp": "2025-11-03T18:12:24.635720"
+    },
+    {
+      "name": "Validation Pipeline - Metrics generation",
+      "passed": true,
+      "details": "Avg confidence: 0.83",
+      "timestamp": "2025-11-03T18:12:24.635735"
+    },
+    {
+      "name": "Ranking - Recruiter priority",
+      "passed": true,
+      "details": "Top result: Recruiter Jane (recruiter)",
+      "timestamp": "2025-11-03T18:12:24.635881"
+    },
+    {
+      "name": "Ranking - Score calculation",
+      "passed": true,
+      "details": "All 3 results have scores",
+      "timestamp": "2025-11-03T18:12:24.635896"
+    },
+    {
+      "name": "Google CSE Integration",
+      "passed": false,
+      "details": "Found 0 results",
+      "timestamp": "2025-11-03T18:12:25.876808"
+    }
+  ]
+}

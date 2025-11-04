@@ -1,20 +1,64 @@
 """Profile-based matching logic for connection relevance scoring"""
 
-from typing import List, Optional
-from src.models.person import Person
-from src.models.job_context import CandidateProfile
+from typing import List, Optional, Dict
+from src.models.person import Person, PersonCategory
+from src.models.job_context import CandidateProfile, JobContext
 from src.db.models import UserProfile, JobRecord
+from src.core.categorizer import PersonCategorizer
 
 
 class ProfileMatcher:
     """Match connections based on user profile and job context"""
     
-    # Match weights
-    ALUMNI_MATCH_WEIGHT = 0.3
-    EX_COMPANY_MATCH_WEIGHT = 0.25
-    SKILLS_OVERLAP_WEIGHT = 0.2
-    DEPARTMENT_MATCH_WEIGHT = 0.15
-    LOCATION_MATCH_WEIGHT = 0.1
+    # Base match weights
+    BASE_WEIGHTS = {
+        'alumni': 0.3,
+        'ex_company': 0.25,
+        'skills': 0.2,
+        'department': 0.15,
+        'location': 0.1
+    }
+    
+    # Career stage specific weight adjustments
+    CAREER_STAGE_WEIGHTS = {
+        'early_career': {
+            'alumni': 1.5,       # Alumni much more important for early career
+            'ex_company': 0.8,   # Less relevant for early career
+            'skills': 0.8,       # Skills less established
+            'department': 1.2,   # Department match is good
+            'location': 1.0,     # Normal importance
+            'recruiter_boost': 0.15,  # Extra boost for recruiters
+            'campus_boost': 0.1       # Boost for campus/university recruiters
+        },
+        'mid_career': {
+            'alumni': 1.0,
+            'ex_company': 1.0,
+            'skills': 1.0,
+            'department': 1.0,
+            'location': 1.0,
+            'recruiter_boost': 0.1,
+            'campus_boost': 0.0
+        },
+        'senior_career': {
+            'alumni': 0.7,       # Less important at senior level
+            'ex_company': 1.2,   # Network from past companies more valuable
+            'skills': 1.2,       # Specific skills matter more
+            'department': 0.9,
+            'location': 0.8,
+            'recruiter_boost': 0.05,
+            'campus_boost': 0.0
+        }
+    }
+    
+    @classmethod
+    def detect_career_stage(cls, title: str) -> str:
+        """Detect career stage from job title"""
+        categorizer = PersonCategorizer(title)
+        if categorizer.is_early_career_role(title):
+            return 'early_career'
+        elif any(kw in title.lower() for kw in ['senior', 'staff', 'principal', 'lead']):
+            return 'senior_career'
+        return 'mid_career'
     
     @classmethod
     def calculate_relevance(
@@ -22,7 +66,8 @@ class ProfileMatcher:
         person: Person,
         profile: Optional[UserProfile] = None,
         job: Optional[JobRecord] = None,
-        candidate_profile: Optional[CandidateProfile] = None
+        candidate_profile: Optional[CandidateProfile] = None,
+        job_context: Optional[JobContext] = None
     ) -> tuple[float, List[str]]:
         """
         Calculate relevance score for a person based on profile and job context.
@@ -31,6 +76,8 @@ class ProfileMatcher:
             person: Person to score
             profile: User profile (optional)
             job: Job record (optional)
+            candidate_profile: CandidateProfile (optional)
+            job_context: JobContext (optional)
             
         Returns:
             (relevance_score, match_reasons) - Score 0.0-1.0, list of match reasons
@@ -38,8 +85,18 @@ class ProfileMatcher:
         score = person.confidence_score or 0.5  # Start with base confidence
         match_reasons = []
         
-        if not profile and not candidate_profile and not job:
+        if not profile and not candidate_profile and not job and not job_context:
             return score, match_reasons
+        
+        # Detect career stage from job title
+        job_title = ''
+        if job_context and job_context.job_title:
+            job_title = job_context.job_title
+        elif job and job.title:
+            job_title = job.title
+            
+        career_stage = cls.detect_career_stage(job_title) if job_title else 'mid_career'
+        stage_weights = cls.CAREER_STAGE_WEIGHTS[career_stage]
         
         # Extract profile data (support both UserProfile and CandidateProfile)
         if candidate_profile:
@@ -88,7 +145,9 @@ class ProfileMatcher:
                 # Check if school keywords appear in person's metadata
                 if school_keywords and len(school_keywords) > 3:
                     if school_keywords in person_text or any(word in person_text for word in school_words if len(word) > 3):
-                        score += cls.ALUMNI_MATCH_WEIGHT
+                        # Apply career stage adjusted weight
+                        alumni_weight = cls.BASE_WEIGHTS['alumni'] * stage_weights['alumni']
+                        score += alumni_weight
                         match_reasons.append(f'alumni_match ({school})')
                         break
         
@@ -100,7 +159,8 @@ class ProfileMatcher:
                 # Check if person works at a company user used to work at
                 # (This could be a connection)
                 if past_company_lower in person_company_lower or person_company_lower in past_company_lower:
-                    score += cls.EX_COMPANY_MATCH_WEIGHT
+                    ex_company_weight = cls.BASE_WEIGHTS['ex_company'] * stage_weights['ex_company']
+                    score += ex_company_weight
                     match_reasons.append('ex_company_match')
                     break
         
@@ -158,8 +218,9 @@ class ProfileMatcher:
             fuzzy_bonus = min(0.05, fuzzy_overlap * 0.01)
             overlap_score += fuzzy_bonus
             
-            # Cap at SKILLS_OVERLAP_WEIGHT
-            overlap_score = min(cls.SKILLS_OVERLAP_WEIGHT, overlap_score)
+            # Apply career stage adjusted weight
+            skills_weight = cls.BASE_WEIGHTS['skills'] * stage_weights['skills']
+            overlap_score = min(skills_weight, overlap_score)
             
             if overlap_score > 0:
                 score += overlap_score
@@ -170,15 +231,29 @@ class ProfileMatcher:
         if job_department and person.department:
             person_dept_lower = person.department.lower()
             if job_department in person_dept_lower or person_dept_lower in job_department:
-                score += cls.DEPARTMENT_MATCH_WEIGHT
+                dept_weight = cls.BASE_WEIGHTS['department'] * stage_weights['department']
+                score += dept_weight
                 match_reasons.append('department_match')
         
         # Check for location match
         if job_location and person.location:
             person_loc_lower = person.location.lower()
             if job_location in person_loc_lower or person_loc_lower in job_location:
-                score += cls.LOCATION_MATCH_WEIGHT
+                location_weight = cls.BASE_WEIGHTS['location'] * stage_weights['location']
+                score += location_weight
                 match_reasons.append('location_match')
+        
+        # Early career specific boosts
+        if career_stage == 'early_career':
+            # Boost recruiters extra for early career
+            if person.category == PersonCategory.RECRUITER:
+                score += stage_weights['recruiter_boost']
+                match_reasons.append('early_career_recruiter_boost')
+                
+            # Boost campus/university recruiters specifically
+            if person.title and any(kw in person.title.lower() for kw in ['campus', 'university', 'college']):
+                score += stage_weights['campus_boost']
+                match_reasons.append('campus_recruiter_boost')
         
         # Factor in source quality (boost high-quality sources)
         from src.core.orchestrator import ConnectionFinder
@@ -196,8 +271,10 @@ class ProfileMatcher:
         cls,
         people: List[Person],
         profile: Optional[UserProfile] = None,
-        job: Optional[JobRecord] = None
-    ) -> List[Person]:
+        job: Optional[JobRecord] = None,
+        candidate_profile: Optional[CandidateProfile] = None,
+        job_context: Optional[JobContext] = None
+    ) -> List[tuple[Person, float, List[str]]]:
         """
         Enhance a list of people with relevance scores based on profile.
         
@@ -205,20 +282,23 @@ class ProfileMatcher:
             people: List of Person objects
             profile: User profile (optional)
             job: Job record (optional)
+            candidate_profile: CandidateProfile (optional)
+            job_context: JobContext (optional)
             
         Returns:
-            List of Person objects with enhanced relevance scores
+            List of tuples: (Person, relevance_score, match_reasons)
         """
         enhanced = []
         
         for person in people:
-            relevance_score, match_reasons = cls.calculate_relevance(person, profile, job)
+            relevance_score, match_reasons = cls.calculate_relevance(
+                person, profile, job, candidate_profile, job_context
+            )
             
-            # Store match reasons in person metadata if available
-            # Since Person model doesn't have match_reasons, we'll return it separately
-            # In the API response, we'll add match_reasons to the JSON
+            # Update the person's confidence score with the enhanced relevance
+            person.confidence_score = relevance_score
             
-            enhanced.append(person)
+            enhanced.append((person, relevance_score, match_reasons))
         
         return enhanced
 
