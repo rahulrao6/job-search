@@ -40,48 +40,101 @@ class PersonValidator:
         'independent contractor', 'self-employed'
     ]
     
-    def __init__(self, company: str):
+    def __init__(self, company: str, company_domain: str = None):
         """
         Initialize validator for a specific company search.
         
         Args:
             company: Company name being searched
+            company_domain: Optional company domain for better verification
         """
         self.company = company.lower().strip()
         self.company_words = set(self.company.split())
+        self.company_domain = company_domain.lower().strip() if company_domain else None
     
-    def validate_person(self, person: Person) -> tuple[bool, str]:
+    def validate_person(self, person: Person) -> tuple[bool, float, str, dict]:
         """
-        Validate if person is a real current employee.
+        Validate if person is a real current employee with confidence scoring.
         
         Returns:
-            (is_valid, reason_if_invalid)
+            (is_valid, confidence_score, reason_if_invalid, validation_details)
         """
-        # Check 1: Name matches company name
+        confidence = 1.0  # Start with full confidence
+        validation_details = {
+            'checks_passed': [],
+            'checks_failed': [],
+            'warnings': [],
+            'confidence_breakdown': {}
+        }
+        
+        # Check 1: Name matches company name (-0.9 confidence, likely reject)
         if self._name_matches_company(person):
-            return False, "Name matches company name (likely false positive)"
+            confidence *= 0.1
+            validation_details['checks_failed'].append('name_matches_company')
+            validation_details['confidence_breakdown']['name_check'] = 0.1
+            if confidence < 0.2:
+                return False, confidence, "Name matches company name (likely false positive)", validation_details
+        else:
+            validation_details['checks_passed'].append('name_check')
+            validation_details['confidence_breakdown']['name_check'] = 1.0
         
-        # Check 2: Past employment indicators
+        # Check 2: Past employment indicators (-0.8 confidence)
         if self._is_past_employee(person):
-            return False, "Past employee (not current)"
+            confidence *= 0.2
+            validation_details['checks_failed'].append('past_employee')
+            validation_details['confidence_breakdown']['employment_status'] = 0.2
+            if confidence < 0.2:
+                return False, confidence, "Past employee (not current)", validation_details
+        else:
+            validation_details['checks_passed'].append('current_employee')
+            validation_details['confidence_breakdown']['employment_status'] = 1.0
         
-        # Check 3: Generic/spam profile
+        # Check 3: Generic/spam profile (-0.5 confidence)
         if self._is_spam_profile(person):
-            return False, "Generic/spam profile"
+            confidence *= 0.5
+            validation_details['warnings'].append('possible_spam_profile')
+            validation_details['confidence_breakdown']['profile_quality'] = 0.5
+        else:
+            validation_details['checks_passed'].append('profile_quality')
+            validation_details['confidence_breakdown']['profile_quality'] = 1.0
         
-        # Check 4: Missing critical info
-        if self._missing_critical_info(person):
-            return False, "Missing critical information"
+        # Check 4: Missing critical info (-0.3 confidence per missing field)
+        missing_info_penalty = self._calculate_missing_info_penalty(person)
+        if missing_info_penalty > 0:
+            confidence *= (1.0 - missing_info_penalty)
+            validation_details['warnings'].append(f'missing_info_penalty_{missing_info_penalty:.2f}')
+            validation_details['confidence_breakdown']['info_completeness'] = 1.0 - missing_info_penalty
+        else:
+            validation_details['checks_passed'].append('info_complete')
+            validation_details['confidence_breakdown']['info_completeness'] = 1.0
         
-        # Check 5: Company mismatch in title
+        # Check 5: Company mismatch in title (-0.7 confidence)
         if self._company_mismatch_in_title(person):
-            return False, "Title indicates different company or missing company context"
+            confidence *= 0.3
+            validation_details['checks_failed'].append('company_mismatch')
+            validation_details['confidence_breakdown']['company_match'] = 0.3
+            if confidence < 0.2:
+                return False, confidence, "Title indicates different company", validation_details
+        else:
+            validation_details['checks_passed'].append('company_match')
+            validation_details['confidence_breakdown']['company_match'] = 1.0
         
-        # Check 6: Verify company appears in title/snippet (additional safety check)
-        if self._missing_company_context(person):
-            return False, "Company not mentioned in title/snippet (likely wrong person)"
+        # Check 6: Company context (+0.2 confidence if strong signals)
+        company_context_score = self._evaluate_company_context(person)
+        if company_context_score < 0.3:
+            confidence *= 0.5
+            validation_details['warnings'].append('weak_company_context')
+            validation_details['confidence_breakdown']['company_context'] = 0.5
+        else:
+            confidence *= (0.8 + 0.2 * company_context_score)  # Boost for strong context
+            validation_details['checks_passed'].append('strong_company_context')
+            validation_details['confidence_breakdown']['company_context'] = company_context_score
         
-        return True, ""
+        # Final decision based on confidence
+        if confidence < 0.3:
+            return False, confidence, "Low confidence match", validation_details
+        
+        return True, confidence, "", validation_details
     
     def validate_batch(self, people: List[Person]) -> List[Person]:
         """
@@ -91,18 +144,28 @@ class PersonValidator:
             List of validated people with confidence scores adjusted
         """
         validated = []
+        validation_results = []
         
         for person in people:
-            is_valid, reason = self.validate_person(person)
+            is_valid, confidence, reason, details = self.validate_person(person)
             
             if is_valid:
-                # Adjust confidence based on quality indicators
-                person.confidence_score = self._calculate_confidence(person)
+                # Update person's confidence score with validation confidence
+                person.confidence_score = confidence
                 validated.append(person)
-            else:
-                print(f"  ⊘ Filtered: {person.name} - {reason}")
+                validation_results.append((person, confidence, details))
+            elif confidence < 0.2:  # Only log very low confidence rejections
+                print(f"  ⊘ Filtered: {person.name} - {reason} (confidence={confidence:.2f})")
         
-        return validated
+        # Remove duplicates, keeping highest confidence version
+        seen_names = {}
+        for person in validated:
+            if person.name not in seen_names or person.confidence_score > seen_names[person.name].confidence_score:
+                seen_names[person.name] = person
+        
+        # Return unique validated people sorted by confidence
+        unique_validated = list(seen_names.values())
+        return sorted(unique_validated, key=lambda p: p.confidence_score, reverse=True)
     
     def _name_matches_company(self, person: Person) -> bool:
         """
@@ -236,34 +299,50 @@ class PersonValidator:
         - Searching "Google" → Title "Engineer at Microsoft" (MISMATCH)
         - Searching "Meta" → Title "Former Meta, now at Amazon" (MISMATCH)
         - Searching "Stripe" → Title "Software Engineer" with no company mention (FILTER - likely wrong person)
+        - Searching "Root" → Title "Engineer at Roots AI" (MISMATCH - different company)
         """
         if not person.title:
-            # If no title, require company mention elsewhere (already checked in _missing_critical_info)
             return False
         
         title_lower = person.title.lower()
         company_lower = self.company.lower()
         company_words = company_lower.split()
         
-        # Check if company is mentioned in title
+        # Check if company OR domain is mentioned (domain is strong signal)
         company_mentioned = (
             company_lower in title_lower or
             any(word in title_lower for word in company_words if len(word) > 3)
         )
         
-        # If title is generic (like "Software Engineer" without company context), filter out
-        # This catches cases where Google returned wrong person
+        # Check domain if available
+        if self.company_domain and self.company_domain in title_lower:
+            company_mentioned = True
+        
+        # If title is generic without company context, filter out
         generic_title_patterns = [
             r'^(software|senior|principal|staff|lead)\s+(engineer|developer|programmer|swe)',
             r'^(product|engineering|technical)\s+(manager|director)',
             r'^(data|machine\s+learning|ml|ai)\s+(engineer|scientist)',
+            r'^(ai|ml|applied)\s+(engineer|researcher)',
         ]
         
         is_generic = any(re.match(pattern, title_lower) for pattern in generic_title_patterns)
         
-        # If title is generic AND company not mentioned, likely wrong person
         if is_generic and not company_mentioned:
             return True  # Filter out - generic title without company context
+        
+        # Check for false positive companies (e.g., Root vs Roots AI)
+        false_positive_companies = {
+            'root': ['root insurance', 'roots ai', 'square root', 'grassroots', 'root cause'],
+            'meta': ['metadata', 'metallic', 'metamask', 'metaphor'],
+            'apple': ['apple tree', 'pineapple', 'apple valley'],
+            'amazon': ['amazon rainforest', 'amazonia'],
+        }
+        
+        if company_lower in false_positive_companies:
+            for false_positive in false_positive_companies[company_lower]:
+                if false_positive in title_lower:
+                    return True  # Wrong company!
         
         # Pattern: "at [company]" or "@ [company]"
         at_pattern = r'(?:at|@)\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+)*)'
@@ -273,11 +352,18 @@ class PersonValidator:
             matched_lower = matched_company.lower()
             # If they mention a different company (not the target)
             if matched_lower != company_lower:
-                # Check if matched company is clearly different (not a variation)
-                # e.g., "Google" vs "Alphabet" should be caught, but "google llc" should not
-                company_variations = {company_lower, company_words[0] if company_words else company_lower}
+                # Check if matched company is clearly different
+                company_variations = {company_lower}
+                if company_words:
+                    company_variations.add(company_words[0])
+                
+                # Add domain variations
+                if self.company_domain:
+                    domain_base = self.company_domain.split('.')[0]
+                    company_variations.add(domain_base)
+                
                 if matched_lower not in company_variations and len(matched_company) > 3:
-                    # But allow if they mention BOTH (e.g., "Former Google, now at Amazon")
+                    # But allow if they mention BOTH companies
                     if not any(word in title_lower for word in company_words if len(word) > 3):
                         return True
         
@@ -381,9 +467,86 @@ class PersonValidator:
         
         # Cap at 1.0
         return min(confidence, 1.0)
+    
+    def _calculate_missing_info_penalty(self, person: Person) -> float:
+        """
+        Calculate penalty for missing information.
+        
+        Returns:
+            Penalty score 0.0-1.0 (higher = more penalty)
+        """
+        penalty = 0.0
+        missing_fields = []
+        
+        # Critical fields
+        if not person.name or person.name.strip() == "":
+            penalty += 0.3
+            missing_fields.append('name')
+        
+        if not person.title or person.title.strip() == "":
+            penalty += 0.2
+            missing_fields.append('title')
+            
+        if not person.linkedin_url:
+            penalty += 0.1
+            missing_fields.append('linkedin_url')
+            
+        # Nice-to-have fields
+        if not person.location:
+            penalty += 0.05
+            missing_fields.append('location')
+            
+        if not person.skills or len(person.skills) == 0:
+            penalty += 0.05
+            missing_fields.append('skills')
+        
+        return min(penalty, 0.7)  # Cap at 70% penalty
+    
+    def _evaluate_company_context(self, person: Person) -> float:
+        """
+        Evaluate how strongly the company context appears in person data.
+        
+        Returns:
+            Score 0.0-1.0 (higher = stronger company signals)
+        """
+        score = 0.0
+        
+        # Build text to analyze
+        text_parts = []
+        if person.title:
+            text_parts.append(person.title.lower())
+        if person.department:
+            text_parts.append(person.department.lower())
+        if person.location:
+            text_parts.append(person.location.lower())
+            
+        combined_text = ' '.join(text_parts)
+        
+        # Check for company name
+        if self.company in combined_text:
+            score += 0.4
+            
+        # Check for company domain
+        if self.company_domain and self.company_domain in combined_text:
+            score += 0.3
+            
+        # Check for @ symbol pattern (e.g., "@ Company")
+        if f"@ {self.company}" in combined_text or f"@{self.company}" in combined_text:
+            score += 0.2
+            
+        # Check for "at Company" pattern
+        if f"at {self.company}" in combined_text:
+            score += 0.1
+            
+        # Bonus for current/present tense indicators
+        current_indicators = ['currently', 'present', 'current role', 'works at', 'working at']
+        if any(indicator in combined_text for indicator in current_indicators):
+            score *= 1.2
+        
+        return min(score, 1.0)  # Cap at 1.0
 
 
-def get_validator(company: str) -> PersonValidator:
+def get_validator(company: str, company_domain: str = None) -> PersonValidator:
     """Get a validator instance for a company"""
-    return PersonValidator(company)
+    return PersonValidator(company, company_domain)
 
