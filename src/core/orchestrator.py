@@ -26,6 +26,8 @@ from .aggregator import PeopleAggregator
 from .categorizer import PersonCategorizer
 from src.utils.openai_enhancer import get_openai_enhancer
 from src.utils.person_validator import get_validator
+from src.utils.ranking_engine import RankingEngine, ScoringWeights
+from src.utils.validation_pipeline import ValidationPipeline
 
 
 class ConnectionFinder:
@@ -244,11 +246,38 @@ class ConnectionFinder:
         # Get all unique people
         all_people = aggregator.get_all()
         
-        # VALIDATE: Remove false positives before processing
-        print(f"\n▶ Validating {len(all_people)} people (removing false positives)...")
-        validator = get_validator(company)
-        validated_people = validator.validate_batch(all_people)
-        print(f"✓ Kept {len(validated_people)} valid people (filtered {len(all_people) - len(validated_people)} false positives)")
+        # VALIDATE: Use comprehensive validation pipeline
+        print(f"\n▶ Running validation pipeline on {len(all_people)} people...")
+        
+        # Extract company domain
+        domain = company_domain
+        if not domain and job_context and job_context.company_domain:
+            domain = job_context.company_domain
+            
+        # Run validation pipeline
+        validation_pipeline = ValidationPipeline()
+        validation_results, metrics = validation_pipeline.process_results(
+            people=all_people,
+            company=company,
+            company_domain=domain,
+            job_context=job_context,
+            candidate_profile=user_profile,
+            source_quality_map=self.SOURCE_QUALITY_SCORES
+        )
+        
+        # Extract validated people
+        validated_people = [
+            result.person for result in validation_results 
+            if result.is_valid
+        ]
+        
+        # Print validation summary
+        print(f"✓ Validation complete:")
+        print(f"  - Kept {len(validated_people)} valid people")
+        print(f"  - Filtered {metrics['rejected_basic_validation']} in basic validation")
+        print(f"  - Filtered {metrics['rejected_quality']} for low quality")
+        print(f"  - Average confidence: {metrics['average_confidence']:.2f}")
+        print(f"  - Average quality: {metrics['average_quality']:.2f}")
         
         # Use OpenAI to enhance if available (but skip if running out of time)
         elapsed_time = time.time() - start_time
@@ -267,8 +296,8 @@ class ConnectionFinder:
         # Group by category
         by_category = self._group_by_category(categorized_people)
         
-        # Sort within each category by source quality, then confidence
-        by_category = self._sort_by_quality(by_category)
+        # Sort within each category using advanced ranking
+        by_category = self._sort_by_quality(by_category, job_context, user_profile)
         
         # Show ALL connections (not just top 5)
         # Users requested to see all data, not limited results
@@ -288,6 +317,18 @@ class ConnectionFinder:
             },
             "source_stats": aggregator.get_stats(),
             "cost_stats": self.cost_tracker.get_stats(),
+            "validation_metrics": metrics,
+            "quality_insights": {
+                "average_confidence": metrics['average_confidence'],
+                "average_quality": metrics['average_quality'],
+                "filters_applied": {
+                    "basic_validation": metrics['rejected_basic_validation'],
+                    "quality_filter": metrics['rejected_quality'],
+                    "threshold_filter": metrics['rejected_threshold']
+                },
+                "high_confidence_count": sum(1 for r in validation_results if r.is_valid and r.confidence_score >= 0.8),
+                "explainable_results": validation_pipeline.get_explainable_results(validation_results, max_results=20)
+            }
         }
         
         # Cache results
@@ -560,24 +601,34 @@ class ConnectionFinder:
         
         return groups
     
-    def _sort_by_quality(self, by_category: Dict[PersonCategory, List[Person]]) -> Dict[PersonCategory, List[Person]]:
+    def _sort_by_quality(self, by_category: Dict[PersonCategory, List[Person]], 
+                        job_context: Optional[JobContext] = None,
+                        candidate_profile: Optional[CandidateProfile] = None) -> Dict[PersonCategory, List[Person]]:
         """
-        Sort people within each category by quality:
-        1. Source quality (SerpAPI > Apollo > GitHub)
-        2. Confidence score
+        Sort people within each category using advanced ranking.
         
-        This ensures high-quality results (with LinkedIn URLs, metadata) appear first,
-        and low-quality results (GitHub with minimal data) appear last.
+        Uses multi-factor scoring:
+        1. Employment verification (current vs past employee)
+        2. Role relevance (based on career stage)
+        3. Profile matching (alumni, skills, etc.)
+        4. Data quality (LinkedIn URL, completeness)
+        5. Source quality (API quality scores)
         """
+        # Use ranking engine for sophisticated scoring
+        ranking_engine = RankingEngine()
+        
+        # Sort each category independently
         for category in by_category:
-            by_category[category] = sorted(
+            # Get ranked results with scores
+            ranked_results = ranking_engine.rank_people(
                 by_category[category],
-                key=lambda p: (
-                    self.SOURCE_QUALITY_SCORES.get(p.source, 0.5),  # Primary: source quality
-                    p.confidence_score  # Secondary: confidence
-                ),
-                reverse=True
+                job_context=job_context,
+                candidate_profile=candidate_profile,
+                source_quality_map=self.SOURCE_QUALITY_SCORES
             )
+            
+            # Extract just the sorted people
+            by_category[category] = [person for person, score, breakdown in ranked_results]
         
         return by_category
     

@@ -10,13 +10,15 @@ import os
 import re
 import requests
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from src.models.person import Person
 from src.models.job_context import CandidateProfile, JobContext
 from src.utils.query_tracker import track_query
+from src.utils.company_resolver import CompanyResolver
+from src.utils.query_optimizer import QueryOptimizer
 
 # Load environment variables
 load_dotenv()
@@ -44,6 +46,11 @@ class ActuallyWorkingFreeSources:
         self.bing_api_key = os.getenv('BING_SEARCH_KEY')
         self.github_token = os.getenv('GITHUB_TOKEN')  # Optional but increases limits
         self.cost_per_search = 0.0  # Free sources!
+        
+        # Company resolver for intelligent matching
+        self.company_resolver = CompanyResolver()
+        # Query optimizer for smarter searches
+        self.query_optimizer = QueryOptimizer()
         
     def search_all(self, company: str, title: str = None, max_results: int = 50, 
                    user_profile: Optional[CandidateProfile] = None,
@@ -133,8 +140,14 @@ class ActuallyWorkingFreeSources:
         people = []
         url = "https://www.googleapis.com/customsearch/v1"
         
-        # Build query variations with context
-        query_variations = self._build_google_query_variations(company, title, user_profile, job_context)
+        # Build query variations with the query optimizer
+        query_variations = self.query_optimizer.generate_queries(
+            company=company,
+            title=title,
+            job_context=job_context,
+            candidate_profile=user_profile,
+            platform='linkedin'
+        )[:7]  # Limit to 7 queries
         
         # Try each query variation until we get good results
         for query in query_variations:
@@ -163,25 +176,23 @@ class ActuallyWorkingFreeSources:
                         title_text = item.get('title', '')
                         snippet = item.get('snippet', '')
                         
-                        if 'linkedin.com/in/' in item_url:
-                            # CRITICAL: Verify company appears in result (reduces false positives)
-                            # Combine title and snippet for company verification
-                            combined_text = f"{title_text} {snippet}".lower()
-                            company_lower = company.lower()
+                        
+                        if '/linkedin.com/in/' in item_url or item_url.startswith('https://linkedin.com/in/'):
+                            # CRITICAL: Verify this is the RIGHT company and CURRENT employee
+                            combined_text = f"{title_text} {snippet}"
                             
-                            # Check if company name appears in the result
-                            # This is crucial - many results mention company but person doesn't work there
-                            company_in_text = (
-                                company_lower in combined_text or
-                                any(word in combined_text for word in company_lower.split() if len(word) > 3)
-                            )
-                            
-                            # Skip if company not mentioned (likely not a current employee)
-                            if not company_in_text:
-                                continue
-                            
+                            # Enhanced verification using domain if available
+                            company_domain = job_context.company_domain if job_context else None
                             # Extract name from title (format: "Name - Job Title - LinkedIn")
                             name = title_text.split(' - ')[0].strip()
+                            
+                            is_correct_company, confidence_boost = self._verify_current_employment(
+                                combined_text, company, company_domain
+                            )
+                            
+                            # Skip only if explicitly rejected (not just low confidence)
+                            if not is_correct_company:
+                                continue
                             
                             # Try to extract title from snippet or title
                             job_title = None
@@ -235,13 +246,17 @@ class ActuallyWorkingFreeSources:
                                     if any(gen in title_lower for gen in generic_titles):
                                         continue
                                 
+                                # Calculate confidence based on verification
+                                base_confidence = 0.8  # Google CSE base
+                                final_confidence = min(1.0, base_confidence + confidence_boost)
+                                
                                 person = Person(
                                     name=name,
                                     title=job_title,
                                     company=extracted_company,
                                     linkedin_url=item_url,
                                     source='google_cse',
-                                    confidence_score=0.9  # High quality from Google
+                                    confidence_score=final_confidence
                                 )
                                 people.append(person)
                     
@@ -268,49 +283,87 @@ class ActuallyWorkingFreeSources:
                                      user_profile: Optional[CandidateProfile] = None,
                                      job_context: Optional[JobContext] = None) -> List[str]:
         """
-        Build multiple query variations using context for better coverage.
+        Build multiple query variations using intelligent patterns.
         
         Strategy:
-        1. Primary: Company + Title (with skills if available)
-        2. School-based: Company + Title + School (alumni search)
-        3. Skills-based: Company + Title + Top skills from job
-        4. Department-based: Company + Department + Title
-        5. Fallback: Just Company + Title (broadest)
+        1. Domain-specific: Company + Domain + Title (most accurate)
+        2. Primary: Company + Title (with skills if available)
+        3. School-based: Company + Title + School (alumni search)
+        4. Skills-based: Company + Title + Top skills from job
+        5. Department-based: Company + Department + Title
+        6. Fallback: Just Company + Title (broadest)
         """
         queries = []
-        base = f'site:linkedin.com/in/ {company}'
+        base = f'site:linkedin.com/in/'
         
-        # Primary query: Company + Title
+        # Don't normalize during search - keep original name for better matches
+        # We'll normalize during verification instead
+        normalized_company = company
+        
+        # Extract company domain if available
+        company_domain = None
+        if job_context and job_context.company_domain:
+            company_domain = job_context.company_domain
+        elif not company_domain:
+            # Try to find domain via resolver
+            company_domain = self.company_resolver.get_company_domain(normalized_company)
+        
+        # Priority 1: Domain-specific query (most accurate for disambiguation)
+        if company_domain:
+            # Query with both company name AND domain for accuracy
+            if title:
+                # Most specific: company + domain + title
+                queries.append(f'{base} "{normalized_company}" "{company_domain}" {title}')
+                # Variation without quotes for broader matching
+                queries.append(f'{base} {normalized_company} {company_domain} {title}')
+            else:
+                queries.append(f'{base} "{normalized_company}" "{company_domain}"')
+        
+        # Priority 2: Company + Title (standard search)
         if title:
-            primary = f'{base} {title}'
+            primary = f'{base} "{normalized_company}" {title}'
             queries.append(primary)
+            
+            # Get alternative patterns from resolver
+            patterns = self.company_resolver.get_company_patterns(normalized_company, company_domain)
+            for pattern in patterns['linkedin'][:2]:  # Use top 2 LinkedIn patterns
+                queries.append(f'{base} {pattern} {title}')
             
             # Add skills from job context if available
             if job_context and job_context.candidate_skills:
                 top_skills = job_context.candidate_skills[:2]  # Top 2 skills
                 if top_skills:
-                    skills_query = f'{base} {title} {" ".join(top_skills)}'
+                    skills_query = f'{base} "{normalized_company}" {title} {" ".join(top_skills)}'
                     queries.append(skills_query)
         
-        # School-based query (alumni search) - higher relevance potential
+        # Priority 3: School-based query (alumni search) - higher relevance potential
         if user_profile and user_profile.schools:
             top_school = user_profile.schools[0]  # Most recent/relevant school
             if title:
-                school_query = f'{base} {title} "{top_school}"'
+                school_query = f'{base} "{normalized_company}" {title} "{top_school}"'
                 queries.append(school_query)
             else:
-                school_query = f'{base} "{top_school}"'
+                school_query = f'{base} "{normalized_company}" "{top_school}"'
                 queries.append(school_query)
         
-        # Department-based query if available
+        # Priority 4: Department-based query if available
         if job_context and job_context.department:
             if title:
-                dept_query = f'{base} "{job_context.department}" {title}'
+                dept_query = f'{base} "{normalized_company}" "{job_context.department}" {title}'
                 queries.append(dept_query)
+        
+        # Priority 5: Location-based if available (local connections)
+        if job_context and job_context.location:
+            if title:
+                location_query = f'{base} "{normalized_company}" {title} "{job_context.location}"'
+                queries.append(location_query)
         
         # Fallback: Just company + title (or company only)
         if not queries:
-            queries.append(f'{base} {title}' if title else base)
+            if title:
+                queries.append(f'{base} "{normalized_company}" {title}')
+            else:
+                queries.append(f'{base} "{normalized_company}"')
         
         # Remove duplicates while preserving order
         seen = set()
@@ -320,7 +373,7 @@ class ActuallyWorkingFreeSources:
                 seen.add(q)
                 unique_queries.append(q)
         
-        return unique_queries[:5]  # Limit to 5 variations
+        return unique_queries[:7]  # Limit to 7 variations
     
     def _search_bing_api(self, company: str, title: str = None,
                         user_profile: Optional[CandidateProfile] = None,
@@ -332,17 +385,17 @@ class ActuallyWorkingFreeSources:
         """
         people = []
         
-        # Build query without strict quotes for better recall
-        query_parts = ['site:linkedin.com/in/', company]
-        if title:
-            query_parts.append(title)
+        # Use query optimizer for Bing queries too
+        query_variations = self.query_optimizer.generate_queries(
+            company=company,
+            title=title,
+            job_context=job_context,
+            candidate_profile=user_profile,
+            platform='linkedin'
+        )
         
-        # Add skills from job context if available
-        if job_context and job_context.candidate_skills:
-            top_skill = job_context.candidate_skills[0]
-            query_parts.append(top_skill)
-        
-        query = ' '.join(query_parts)
+        # Use the first optimized query for Bing
+        query = query_variations[0] if query_variations else f'site:linkedin.com/in/ {company} {title or ""}'
         
         url = "https://api.bing.microsoft.com/v7.0/search"
         headers = {
@@ -408,25 +461,46 @@ class ActuallyWorkingFreeSources:
         # Build query with title if available
         company_query = company.replace(' ', '+')
         
-        # Try different query strategies
+        # Generate optimized queries
+        optimizer_queries = self.query_optimizer.generate_queries(
+            company=company,
+            title=title,
+            job_context=job_context,
+            candidate_profile=None,  # GitHub doesn't use candidate profile
+            platform='github'
+        )
+        
+        # Convert optimizer queries to GitHub API format
         queries = []
         
-        # Strategy 1: Company + Title in bio (most targeted)
-        if title:
-            # Extract main title word (e.g., "Software Engineer" -> "Engineer")
-            title_words = title.split()
-            if len(title_words) > 1:
-                main_title = title_words[-1]  # Usually the role type
-                queries.append(f'{company_query} {main_title.lower()} in:bio type:user')
-            queries.append(f'{company_query} "{title.lower()}" in:bio type:user')
+        # Use optimizer suggestions but adapt for GitHub API
+        for opt_query in optimizer_queries[:3]:  # Use top 3 suggestions
+            # Extract key terms from optimizer query
+            if 'org:' in opt_query:
+                # Handle org-specific queries
+                org_match = re.search(r'org:(\w+)', opt_query)
+                if org_match:
+                    org = org_match.group(1)
+                    if title:
+                        queries.append(f'{org} {title.lower()} in:bio type:user')
+                    else:
+                        queries.append(f'{org} in:bio type:user')
+            elif 'language:' in opt_query:
+                # Handle language-specific queries
+                lang_match = re.search(r'language:(\w+)', opt_query)
+                if lang_match:
+                    lang = lang_match.group(1)
+                    queries.append(f'{company_query} language:{lang} type:user')
+            else:
+                # General bio search
+                if title and title.lower() in opt_query.lower():
+                    queries.append(f'{company_query} "{title.lower()}" in:bio type:user')
         
-        # Strategy 2: Company only (fallback)
-        queries.append(f'{company_query} in:bio type:user')
-        
-        # Strategy 3: Company + Skills from job (if available)
-        if job_context and job_context.candidate_skills:
-            top_skill = job_context.candidate_skills[0].lower()
-            queries.append(f'{company_query} {top_skill} in:bio type:user')
+        # Add fallback if no good queries from optimizer
+        if not queries:
+            if title:
+                queries.append(f'{company_query} "{title.lower()}" in:bio type:user')
+            queries.append(f'{company_query} in:bio type:user')
         
         # Try first query that returns results
         params_base = {
@@ -623,6 +697,44 @@ class ActuallyWorkingFreeSources:
         # Use our main search method with context
         return self.search_all(company, title, max_results=max_results,
                               user_profile=user_profile, job_context=job_context)
+    
+    def _verify_current_employment(self, text: str, company: str, company_domain: str = None) -> Tuple[bool, float]:
+        """
+        Verify this person currently works at the target company using intelligent matching.
+        
+        Returns:
+            (is_current_employee, confidence_score) - tuple of bool and float
+        """
+        # Use company resolver for intelligent matching
+        normalized_company = self.company_resolver.normalize_company_name(company)
+        
+        # Calculate match score with BOTH original and normalized names
+        score_original = self.company_resolver.calculate_company_match_score(
+            text, company, company_domain
+        )
+        score_normalized = self.company_resolver.calculate_company_match_score(
+            text, normalized_company, company_domain
+        )
+        
+        # Use the higher score (company might appear as either)
+        score = max(score_original, score_normalized)
+        
+        # If company is ambiguous, require higher confidence
+        if self.company_resolver.is_ambiguous_company(normalized_company):
+            # For ambiguous companies, require domain or strong signals
+            if score < 0.3 and not company_domain:
+                # Reduce confidence for ambiguous companies without strong signals
+                return True, score * 0.5
+        
+        # Determine employment status based on score
+        if score == 0.0:
+            return False, 0.0  # Definitely not current employee
+        elif score >= 0.4:
+            return True, score  # High confidence current employee
+        elif score >= 0.2:
+            return True, score * 0.8  # Medium confidence
+        else:
+            return True, score * 0.5  # Low confidence but don't reject
     
     def is_configured(self) -> bool:
         """
