@@ -11,7 +11,7 @@ import re
 import requests
 import time
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -182,108 +182,151 @@ class ActuallyWorkingFreeSources:
                     'start': 1,
                 }
                 
-                response = requests.get(url, params=params, timeout=5)
+                response = requests.get(url, params=params, timeout=10)
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get('items', [])
-                    results_count = len(items)
+                # Check for HTTP errors
+                if response.status_code != 200:
+                    logger.warning(f"Google CSE HTTP error {response.status_code}: {response.text[:200]}")
+                    print(f"    ⚠️  Google CSE HTTP {response.status_code}: {response.text[:100]}")
+                    continue
+                
+                data = response.json()
+                
+                # Check for API errors in response (Google CSE can return errors in JSON even with 200 status)
+                if 'error' in data:
+                    error_info = data['error']
+                    error_message = error_info.get('message', 'Unknown error')
+                    error_code = error_info.get('code', 'unknown')
+                    logger.error(f"Google CSE API error {error_code}: {error_message}")
+                    print(f"    ✗ Google CSE API error: {error_message}")
+                    # Common errors: quotaExceeded, invalid API key, invalid CSE ID
+                    if 'quota' in error_message.lower():
+                        print("    💡 Google CSE quota exceeded (100/day limit)")
+                    elif 'invalid' in error_message.lower() or 'key' in error_message.lower():
+                        print("    💡 Check GOOGLE_API_KEY and GOOGLE_CSE_ID in .env")
+                    continue
+                
+                items = data.get('items', [])
+                results_count = len(items)
+                
+                # Log if we got results but no items (might indicate searchInfo)
+                if results_count == 0:
+                    search_info = data.get('searchInformation', {})
+                    total_results = search_info.get('totalResults', '0')
+                    logger.debug(f"Google CSE query '{query}': {total_results} total results, {results_count} items returned")
+                    if total_results == '0':
+                        print(f"    ℹ️  Query returned 0 results: '{query[:50]}...'")
+                
+                for item in items:
+                    item_url = item.get('link', '')
+                    title_text = item.get('title', '')
+                    snippet = item.get('snippet', '')
                     
-                    for item in items:
-                        item_url = item.get('link', '')
-                        title_text = item.get('title', '')
-                        snippet = item.get('snippet', '')
+                    if '/linkedin.com/in/' in item_url or item_url.startswith('https://linkedin.com/in/'):
+                        # CRITICAL: Verify this is the RIGHT company and CURRENT employee
+                        combined_text = f"{title_text} {snippet}"
                         
+                        # Enhanced verification using domain if available
+                        company_domain = job_context.company_domain if job_context else None
+                        # Extract name from title (format: "Name - Job Title - LinkedIn")
+                        name = title_text.split(' - ')[0].strip()
                         
-                        if '/linkedin.com/in/' in item_url or item_url.startswith('https://linkedin.com/in/'):
-                            # CRITICAL: Verify this is the RIGHT company and CURRENT employee
-                            combined_text = f"{title_text} {snippet}"
+                        is_correct_company, confidence_boost = self._verify_current_employment(
+                            combined_text, company, company_domain
+                        )
+                        
+                        # Skip only if explicitly rejected (not just low confidence)
+                        if not is_correct_company:
+                            continue
+                        
+                        # Store snippet for enhanced validation
+                        person_snippet = combined_text
+                        
+                        # Try to extract title from snippet or title
+                        job_title = None
+                        if ' - ' in title_text:
+                            parts = title_text.split(' - ')
+                            if len(parts) >= 2:
+                                job_title = parts[1].strip()
+                        
+                        # If no title from title field, try to extract from snippet
+                        if not job_title and snippet:
+                            # Look for job title patterns in snippet
+                            # Common pattern: "Title at Company" or "Title | Company"
+                            title_patterns = [
+                                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:at|@|•|\|)\s+' + re.escape(company),
+                                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Engineer',
+                                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Manager',
+                                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Director',
+                            ]
+                            for pattern in title_patterns:
+                                match = re.search(pattern, snippet, re.IGNORECASE)
+                                if match:
+                                    potential_title = match.group(1).strip()
+                                    if len(potential_title) > 3 and len(potential_title) < 50:
+                                        job_title = potential_title
+                                        break
+                        
+                        # Extract actual company from snippet if mentioned
+                        extracted_company = company  # Default to search company
+                        # Verify company name from snippet (handles variations like "Google LLC")
+                        company_lower = company.lower()
+                        if snippet:
+                            # Look for company mention in snippet
+                            company_pattern = r'\b(' + '|'.join([
+                                re.escape(company_lower),
+                                re.escape(company_lower.split()[0]) if ' ' in company_lower else company_lower
+                            ]) + r')\b'
+                            if re.search(company_pattern, snippet.lower()):
+                                # Company is mentioned - good sign
+                                pass
+                            else:
+                                # Company not clearly mentioned - lower confidence
+                                # But still include if it was in the combined text check above
+                                pass
+                        
+                        if len(name) > 2:
+                            # Additional validation: Title should be meaningful
+                            # Filter out if title is too generic without company context
+                            if job_title:
+                                title_lower = job_title.lower()
+                                # Skip generic titles that don't suggest employment at company
+                                generic_titles = ['student', 'freelancer', 'consultant', 'seeking']
+                                if any(gen in title_lower for gen in generic_titles):
+                                    continue
                             
-                            # Enhanced verification using domain if available
-                            company_domain = job_context.company_domain if job_context else None
-                            # Extract name from title (format: "Name - Job Title - LinkedIn")
-                            name = title_text.split(' - ')[0].strip()
+                            # Calculate confidence based on verification
+                            base_confidence = 0.8  # Google CSE base
+                            final_confidence = min(1.0, base_confidence + confidence_boost)
                             
-                            is_correct_company, confidence_boost = self._verify_current_employment(
-                                combined_text, company, company_domain
+                            person = Person(
+                                name=name,
+                                title=job_title,
+                                company=extracted_company,
+                                linkedin_url=item_url,
+                                source='google_cse',
+                                confidence_score=final_confidence
                             )
-                            
-                            # Skip only if explicitly rejected (not just low confidence)
-                            if not is_correct_company:
-                                continue
-                            
-                            # Try to extract title from snippet or title
-                            job_title = None
-                            if ' - ' in title_text:
-                                parts = title_text.split(' - ')
-                                if len(parts) >= 2:
-                                    job_title = parts[1].strip()
-                            
-                            # If no title from title field, try to extract from snippet
-                            if not job_title and snippet:
-                                # Look for job title patterns in snippet
-                                # Common pattern: "Title at Company" or "Title | Company"
-                                title_patterns = [
-                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:at|@|•|\|)\s+' + re.escape(company),
-                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Engineer',
-                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Manager',
-                                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Director',
-                                ]
-                                for pattern in title_patterns:
-                                    match = re.search(pattern, snippet, re.IGNORECASE)
-                                    if match:
-                                        potential_title = match.group(1).strip()
-                                        if len(potential_title) > 3 and len(potential_title) < 50:
-                                            job_title = potential_title
-                                            break
-                            
-                            # Extract actual company from snippet if mentioned
-                            extracted_company = company  # Default to search company
-                            # Verify company name from snippet (handles variations like "Google LLC")
-                            if snippet:
-                                # Look for company mention in snippet
-                                company_pattern = r'\b(' + '|'.join([
-                                    re.escape(company_lower),
-                                    re.escape(company_lower.split()[0]) if ' ' in company_lower else company_lower
-                                ]) + r')\b'
-                                if re.search(company_pattern, snippet.lower()):
-                                    # Company is mentioned - good sign
-                                    pass
-                                else:
-                                    # Company not clearly mentioned - lower confidence
-                                    # But still include if it was in the combined text check above
-                                    pass
-                            
-                            if len(name) > 2:
-                                # Additional validation: Title should be meaningful
-                                # Filter out if title is too generic without company context
-                                if job_title:
-                                    title_lower = job_title.lower()
-                                    # Skip generic titles that don't suggest employment at company
-                                    generic_titles = ['student', 'freelancer', 'consultant', 'seeking']
-                                    if any(gen in title_lower for gen in generic_titles):
-                                        continue
-                                
-                                # Calculate confidence based on verification
-                                base_confidence = 0.8  # Google CSE base
-                                final_confidence = min(1.0, base_confidence + confidence_boost)
-                                
-                                person = Person(
-                                    name=name,
-                                    title=job_title,
-                                    company=extracted_company,
-                                    linkedin_url=item_url,
-                                    source='google_cse',
-                                    confidence_score=final_confidence
-                                )
-                                people.append(person)
+                            # Store snippet for enhanced validation
+                            person._text_snippet = person_snippet
+                            people.append(person)
                     
-                    query_success = True
+                # Mark query as successful if we got here (no errors)
+                query_success = True
                         
-            except Exception as e:
-                # Continue to next query variation
+            except requests.exceptions.Timeout:
+                logger.warning(f"Google CSE timeout for query: {query[:50]}")
+                print(f"    ⚠️  Google CSE timeout (query too slow)")
                 query_success = False
-                pass
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Google CSE request error: {e}")
+                print(f"    ⚠️  Google CSE request error: {str(e)[:50]}")
+                query_success = False
+            except Exception as e:
+                # Log unexpected errors
+                logger.error(f"Google CSE unexpected error for query '{query[:50]}': {e}", exc_info=True)
+                print(f"    ✗ Google CSE error: {str(e)[:50]}")
+                query_success = False
             finally:
                 # Track query performance
                 execution_time_ms = (time.time() - start_time) * 1000
@@ -722,9 +765,17 @@ class ActuallyWorkingFreeSources:
         """
         Verify this person currently works at the target company using intelligent matching.
         
+        Enhanced with:
+        - Date pattern parsing
+        - Recency signal detection
+        - Position order checking
+        
         Returns:
             (is_current_employee, confidence_score) - tuple of bool and float
         """
+        text_lower = text.lower()
+        company_lower = company.lower()
+        
         # Use company resolver for intelligent matching
         normalized_company = self.company_resolver.normalize_company_name(company)
         
@@ -739,6 +790,65 @@ class ActuallyWorkingFreeSources:
         # Use the higher score (company might appear as either)
         score = max(score_original, score_normalized)
         
+        # Enhanced verification: Check for negative signals (past employment)
+        negative_signals = {
+            'formerly': 2.0,
+            'ex-': 2.0,
+            'was at': 1.0,
+            'worked at': 1.0,
+            'alumni': 1.0,
+            'former': 2.0,
+            'previously': 1.5,
+        }
+        
+        negative_score = 0.0
+        for signal, weight in negative_signals.items():
+            if signal in text_lower:
+                signal_pos = text_lower.find(signal)
+                company_pos = text_lower.find(company_lower)
+                if company_pos != -1 and abs(signal_pos - company_pos) < 50:
+                    negative_score += weight
+                    if negative_score > 2.0:
+                        return False, 0.0  # Definitely past employee
+        
+        # Date pattern parsing for LinkedIn date formats
+        import re
+        date_patterns = [
+            r'(\w+\s+\d{4})\s*[-–]\s*(Present|Current)',  # "Jan 2023 - Present"
+            r'(\d{4})\s*[-–]\s*(Present|Current)',        # "2023 - Present"
+        ]
+        
+        has_present_date = False
+        for pattern in date_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                end_date = match.group(2) if len(match.groups()) >= 2 else None
+                if end_date and end_date.lower() in ['present', 'current']:
+                    has_present_date = True
+                    score += 0.3  # Boost for "Present" indicator
+                    break
+        
+        # Positive recency signals
+        recency_signals = [
+            f'at {company_lower}',
+            f'{company_lower} · full-time',
+            'present',
+            'current',
+            'ongoing'
+        ]
+        
+        for signal in recency_signals:
+            if signal in text_lower:
+                score += 0.1
+                break
+        
+        # Position order check - LinkedIn shows current job first
+        # If company appears in first 100 chars, it's likely current position
+        if len(text) > 0:
+            first_100_chars = text[:100].lower()
+            if company_lower in first_100_chars:
+                score += 0.3
+        
         # If company is ambiguous, require higher confidence
         if self.company_resolver.is_ambiguous_company(normalized_company):
             # For ambiguous companies, require domain or strong signals
@@ -746,8 +856,12 @@ class ActuallyWorkingFreeSources:
                 # Reduce confidence for ambiguous companies without strong signals
                 return True, score * 0.5
         
+        # Apply negative score penalty
+        if negative_score > 0:
+            score = max(0.0, score - (negative_score * 0.2))
+        
         # Determine employment status based on score
-        if score == 0.0:
+        if score == 0.0 or negative_score > 2.0:
             return False, 0.0  # Definitely not current employee
         elif score >= 0.4:
             return True, score  # High confidence current employee

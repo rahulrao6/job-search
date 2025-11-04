@@ -78,16 +78,23 @@ class PersonValidator:
             validation_details['checks_passed'].append('name_check')
             validation_details['confidence_breakdown']['name_check'] = 1.0
         
-        # Check 2: Past employment indicators (-0.8 confidence)
-        if self._is_past_employee(person):
+        # Check 2: Past employment indicators with enhanced verification
+        # Get text snippet if available (from LinkedIn search results)
+        text_snippet = getattr(person, '_text_snippet', None) or person.title
+        is_past, confidence_boost = self._is_past_employee(person, text_snippet)
+        
+        if is_past:
             confidence *= 0.2
             validation_details['checks_failed'].append('past_employee')
             validation_details['confidence_breakdown']['employment_status'] = 0.2
             if confidence < 0.2:
                 return False, confidence, "Past employee (not current)", validation_details
         else:
+            # Apply confidence boost from verification
+            if confidence_boost > 0:
+                confidence = min(1.0, confidence + confidence_boost)
             validation_details['checks_passed'].append('current_employee')
-            validation_details['confidence_breakdown']['employment_status'] = 1.0
+            validation_details['confidence_breakdown']['employment_status'] = min(1.0, 0.8 + confidence_boost)
         
         # Check 3: Generic/spam profile (-0.5 confidence)
         if self._is_spam_profile(person):
@@ -203,45 +210,101 @@ class PersonValidator:
         
         return False
     
-    def _is_past_employee(self, person: Person) -> bool:
+    def _is_past_employee(self, person: Person, text_snippet: Optional[str] = None) -> tuple[bool, float]:
         """
-        Check if title/bio indicates past employment.
+        Check if title/bio indicates past employment with confidence scoring.
         
         Enhanced detection:
-        - Expanded keyword list
-        - Pattern matching for phrases like "was at [company]" or "[company] alumnus"
+        - Date pattern parsing for LinkedIn formats
+        - Recency signal detection with scoring
+        - Position order checking
+        
+        Returns:
+            (is_past_employee: bool, confidence_boost: float)
+            - is_past_employee: True if likely past employee
+            - confidence_boost: Negative score if past, positive if current
         
         Examples:
-        - "Former Software Engineer at Google"
-        - "Ex-Meta Engineer"
-        - "Previously at Amazon"
-        - "Was at Stripe"
-        - "Google Alumnus"
+        - "Former Software Engineer at Google" → (True, -0.8)
+        - "Software Engineer at Google - Present" → (False, 0.3)
+        - "Jan 2023 - Present" with company → (False, 0.2)
         """
         if not person.title:
-            return False
+            return False, 0.0
         
         title_lower = person.title.lower()
+        text_to_check = (text_snippet or person.title).lower()
         
-        # Check for keywords
-        for keyword in self.PAST_EMPLOYMENT_KEYWORDS:
-            if keyword in title_lower:
-                return True
+        # Negative score accumulator
+        negative_score = 0.0
+        positive_score = 0.0
         
-        # Pattern matching for common past employment phrases
-        past_patterns = [
-            r'was\s+at\s+[a-z]+',  # "was at Google"
-            r'[a-z]+\s+alumnus',   # "Google alumnus"
-            r'alumnus\s+of\s+[a-z]+',  # "alumnus of Google"
-            r'formerly\s+[a-z]+',  # "formerly Google"
-            r'previous\s+[a-z]+\s+employee',  # "previous Google employee"
+        # Check for negative keywords with weighted scoring
+        negative_keywords = {
+            'formerly': 2.0,
+            'ex-': 2.0,
+            'was at': 1.0,
+            'worked at': 1.0,
+            'alumni': 1.0,
+            'former': 2.0,
+            'previously': 1.5,
+            'past': 1.0,
+            'retired from': 2.0,
+        }
+        
+        for keyword, weight in negative_keywords.items():
+            if keyword in text_to_check:
+                # Check proximity to company name
+                keyword_pos = text_to_check.find(keyword)
+                company_pos = text_to_check.find(self.company)
+                if company_pos != -1 and abs(keyword_pos - company_pos) < 50:
+                    negative_score += weight
+        
+        # Date pattern parsing for LinkedIn date formats
+        date_patterns = [
+            r'(\w+\s+\d{4})\s*[-–]\s*(Present|Current)',  # "Jan 2023 - Present"
+            r'(\d{4})\s*[-–]\s*(Present|Current)',        # "2023 - Present"
+            r'(\w+\s+\d{4})\s*[-–]\s*(\w+\s+\d{4})',      # "Jan 2023 - Dec 2024"
         ]
         
-        for pattern in past_patterns:
-            if re.search(pattern, title_lower):
-                return True
+        has_present_date = False
+        for pattern in date_patterns:
+            match = re.search(pattern, text_to_check, re.IGNORECASE)
+            if match:
+                end_date = match.group(2) if len(match.groups()) >= 2 else None
+                if end_date and end_date.lower() in ['present', 'current']:
+                    has_present_date = True
+                    positive_score += 0.3
+                    break
         
-        return False
+        # Positive signals for current employment
+        positive_signals = {
+            f'at {self.company}': 0.3,
+            f'{self.company} · full-time': 0.3,
+            'present': 0.2,
+            'current': 0.2,
+            'ongoing': 0.15,
+        }
+        
+        for signal, weight in positive_signals.items():
+            if signal in text_to_check:
+                positive_score += weight
+                break  # Only count strongest signal
+        
+        # Position order check - LinkedIn shows current job first
+        # If company appears in first 100 chars, it's likely current position
+        if text_snippet:
+            first_100_chars = text_snippet[:100].lower()
+            if self.company.lower() in first_100_chars:
+                positive_score += 0.3
+        
+        # Determine if past employee
+        is_past = negative_score > 1.5 or (negative_score > 0.5 and not has_present_date and positive_score < 0.2)
+        
+        # Calculate confidence boost (negative if past, positive if current)
+        confidence_boost = positive_score - (negative_score * 0.3)
+        
+        return is_past, confidence_boost
     
     def _is_spam_profile(self, person: Person) -> bool:
         """

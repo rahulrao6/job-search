@@ -329,25 +329,56 @@ class CompanyResolver:
         """
         Calculate how likely this text is about someone at the company.
         
+        Enhanced with:
+        - Date pattern parsing for "Present/Current" indicators
+        - Enhanced negative signal detection with proximity
+        - Recency signal boosting
+        
         Returns score 0.0 to 1.0 based on multiple signals.
         """
         text_lower = text.lower()
         company_lower = company.lower()
         score = 0.0
         
-        # Check for negative signals first
-        negative_signals = [
-            'former', 'ex-', 'previously', 'formerly', 'alumni',
-            'was at', 'worked at', 'used to', 'past'
-        ]
+        # Check for negative signals first with enhanced proximity checking
+        negative_signals = {
+            'former': 2.0,
+            'ex-': 2.0,
+            'previously': 1.5,
+            'formerly': 2.0,
+            'alumni': 1.0,
+            'was at': 1.0,
+            'worked at': 1.0,
+            'used to': 1.0,
+            'past': 1.0
+        }
         
-        for signal in negative_signals:
+        negative_score = 0.0
+        for signal, weight in negative_signals.items():
             if signal in text_lower and company_lower in text_lower:
                 # Check proximity
                 signal_pos = text_lower.find(signal)
                 company_pos = text_lower.find(company_lower)
-                if abs(signal_pos - company_pos) < 50:
-                    return 0.0  # Definitely not current
+                if company_pos != -1 and abs(signal_pos - company_pos) < 50:
+                    negative_score += weight
+                    if negative_score > 2.0:
+                        return 0.0  # Definitely not current
+        
+        # Date pattern parsing for LinkedIn date formats
+        date_patterns = [
+            r'(\w+\s+\d{4})\s*[-–]\s*(Present|Current)',  # "Jan 2023 - Present"
+            r'(\d{4})\s*[-–]\s*(Present|Current)',        # "2023 - Present"
+        ]
+        
+        has_present_date = False
+        for pattern in date_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                end_date = match.group(2) if len(match.groups()) >= 2 else None
+                if end_date and end_date.lower() in ['present', 'current']:
+                    has_present_date = True
+                    score += 0.2  # Boost for "Present" indicator
+                    break
         
         # Positive signals with weights
         if domain and domain.lower() in text_lower:
@@ -386,6 +417,14 @@ class CompanyResolver:
                 if keyword in text_lower:
                     score += 0.1
                     break
+        
+        # Recency signal boost (if has present date, boost more)
+        if has_present_date:
+            score += 0.1  # Additional boost for explicit "Present" date
+        
+        # Apply negative score penalty
+        if negative_score > 0:
+            score = max(0.0, score - (negative_score * 0.2))
         
         # Basic company mention (fallback)
         if score == 0.0 and company_lower in text_lower:

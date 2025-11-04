@@ -17,7 +17,7 @@ class ApolloClient(BaseAPIClient):
     Docs: https://apolloio.github.io/apollo-api-docs/
     """
     
-    BASE_URL = "https://api.apollo.io/v1"
+    BASE_URL = "https://api.apollo.io/api/v1"
     
     def __init__(self, api_key: Optional[str] = None):
         super().__init__(api_key or os.getenv("APOLLO_API_KEY"))
@@ -69,7 +69,7 @@ class ApolloClient(BaseAPIClient):
         }
         
         try:
-            # Use the correct free tier endpoint
+            # Use the contacts/search endpoint
             response = requests.post(
                 f"{self.BASE_URL}/contacts/search",
                 json=params,
@@ -78,6 +78,12 @@ class ApolloClient(BaseAPIClient):
             )
             response.raise_for_status()
             data = response.json()
+            
+            # Check for free tier limitations
+            if "error" in data and "free plan" in data.get("error", "").lower():
+                print(f"⚠️  Apollo free tier doesn't include contact search. Upgrade required.")
+                print(f"   Error: {data.get('error', 'Unknown')}")
+                return []
             
             # Track cost (free tier but still track usage)
             # Note: Each result uses 1 email credit from your 10k/month
@@ -91,12 +97,31 @@ class ApolloClient(BaseAPIClient):
                 if person:
                     people.append(person)
             
-            print(f"✓ Apollo found {len(people)} people (used {credits_used} of 10k free credits)")
+            if len(people) > 0:
+                print(f"✓ Apollo found {len(people)} people (used {credits_used} of 10k free credits)")
+            else:
+                # Check if it's a free tier limitation (0 results could mean no access)
+                pagination = data.get("pagination", {})
+                total_entries = pagination.get("total_entries", 0)
+                if total_entries == 0:
+                    # This might indicate free tier limitation - log it but don't spam
+                    pass  # Silent skip - free tier may not have search access
+            
             return people
             
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 print(f"⚠️  Apollo authentication failed - check API key")
+            elif e.response.status_code == 403:
+                # Check if it's a free tier limitation
+                try:
+                    error_data = e.response.json()
+                    if "free plan" in error_data.get("error", "").lower():
+                        print(f"⚠️  Apollo free tier doesn't include contact search. Upgrade required for search access.")
+                    else:
+                        print(f"⚠️  Apollo access denied: {error_data.get('error', 'Unknown')}")
+                except:
+                    print(f"⚠️  Apollo access denied (403)")
             elif e.response.status_code == 429:
                 print(f"⚠️  Apollo rate limit exceeded")
             else:
