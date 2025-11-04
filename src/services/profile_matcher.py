@@ -92,8 +92,8 @@ class ProfileMatcher:
         job_title = ''
         if job_context and job_context.job_title:
             job_title = job_context.job_title
-        elif job and job.title:
-            job_title = job.title
+        elif job and job.job_title:
+            job_title = job.job_title
             
         career_stage = cls.detect_career_stage(job_title) if job_title else 'mid_career'
         stage_weights = cls.CAREER_STAGE_WEIGHTS[career_stage]

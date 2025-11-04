@@ -274,6 +274,28 @@ class ConnectionFinder:
         # Show ALL connections (not just top 5)
         # Users requested to see all data, not limited results
         
+        # Calculate metrics from validated people
+        total_processed = len(all_people)
+        valid_count = len(validated_people)
+        rejected_basic = filtered_count
+        
+        # Calculate average confidence and quality scores
+        avg_confidence = sum(p.confidence_score for p in validated_people) / max(valid_count, 1) if validated_people else 0.0
+        avg_quality = avg_confidence  # Use confidence as proxy for quality when detailed quality scores aren't available
+        
+        # Calculate high confidence count
+        high_confidence_count = sum(1 for p in validated_people if hasattr(p, 'confidence_score') and p.confidence_score >= 0.8)
+        
+        metrics = {
+            'total_processed': total_processed,
+            'rejected_basic_validation': rejected_basic,
+            'rejected_quality': 0,  # Not tracked in current validation
+            'rejected_threshold': 0,  # Not tracked in current validation
+            'valid_results': valid_count,
+            'average_confidence': avg_confidence,
+            'average_quality': avg_quality
+        }
+        
         # Prepare results
         results = {
             "company": company,
@@ -298,8 +320,8 @@ class ConnectionFinder:
                     "quality_filter": metrics['rejected_quality'],
                     "threshold_filter": metrics['rejected_threshold']
                 },
-                "high_confidence_count": sum(1 for r in validation_results if r.is_valid and r.confidence_score >= 0.8),
-                "explainable_results": validation_pipeline.get_explainable_results(validation_results, max_results=20)
+                "high_confidence_count": high_confidence_count,
+                "explainable_results": []  # Simplified - no detailed explanations available
             }
         }
         
